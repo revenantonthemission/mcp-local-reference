@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>mcp-local-reference — Project Overview</title>
+<style>
+  :root {
+    --bg: #0f172a;
+    --surface: #1e293b;
+    --text: #e2e8f0;
+    --accent: #38bdf8;
+    --muted: #94a3b8;
+    --green: #4ade80;
+    --orange: #fb923c;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); }
+  .slide { display: none; min-height: 100vh; padding: 4rem 6rem; flex-direction: column; justify-content: center; }
+  .slide.active { display: flex; }
+  h1 { font-size: 3rem; font-weight: 800; margin-bottom: 1rem; color: var(--accent); }
+  h2 { font-size: 2rem; font-weight: 700; margin-bottom: 1.5rem; color: var(--accent); }
+  h3 { font-size: 1.3rem; font-weight: 600; margin: 1.5rem 0 0.75rem; color: var(--green); }
+  p, li { font-size: 1.2rem; line-height: 1.7; color: var(--text); }
+  ul { list-style: none; padding: 0; }
+  ul li::before { content: "→ "; color: var(--accent); font-weight: bold; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+  th { background: var(--surface); color: var(--accent); text-align: left; padding: 0.75rem 1rem; font-size: 1rem; border-bottom: 2px solid var(--accent); }
+  td { padding: 0.75rem 1rem; font-size: 1rem; border-bottom: 1px solid #334155; }
+  tr:hover td { background: rgba(56, 189, 248, 0.05); }
+  code { background: var(--surface); padding: 0.15rem 0.4rem; border-radius: 4px; font-size: 0.95em; color: var(--green); }
+  pre { background: var(--surface); padding: 1.5rem; border-radius: 8px; overflow-x: auto; margin: 1rem 0; border-left: 3px solid var(--accent); }
+  pre code { background: none; padding: 0; color: var(--text); }
+  .subtitle { font-size: 1.4rem; color: var(--muted); margin-bottom: 2rem; }
+  .badge { display: inline-block; background: var(--surface); border: 1px solid var(--accent); color: var(--accent); padding: 0.25rem 0.75rem; border-radius: 999px; font-size: 0.85rem; margin: 0.25rem; }
+  .nav { position: fixed; bottom: 2rem; right: 2rem; display: flex; gap: 0.5rem; z-index: 10; }
+  .nav button { background: var(--surface); color: var(--accent); border: 1px solid var(--accent); padding: 0.5rem 1rem; border-radius: 6px; cursor: pointer; font-size: 1rem; transition: background 0.2s; }
+  .nav button:hover { background: var(--accent); color: var(--bg); }
+  .counter { position: fixed; bottom: 2rem; left: 2rem; color: var(--muted); font-size: 0.9rem; }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; }
+  .card { background: var(--surface); border-radius: 8px; padding: 1.5rem; border-left: 3px solid var(--accent); }
+</style>
+</head>
+<body>
+
+<!-- Slide 1: Title -->
+<div class="slide active" id="s1">
+  <h1>mcp-local-reference</h1>
+  <p class="subtitle">MCP server for Zotero references, PDF text, and figure cropping</p>
+  <div>
+    <span class="badge">Python 3.11+</span>
+    <span class="badge">FastMCP</span>
+    <span class="badge">PyMuPDF</span>
+    <span class="badge">ChromaDB</span>
+    <span class="badge">Pillow</span>
+    <span class="badge">MIT License</span>
+  </div>
+  <p style="margin-top:2rem; color: var(--muted);">Designed for research-informed blog writing with Claude Desktop</p>
+</div>
+
+<!-- Slide 2: Problem & Solution -->
+<div class="slide" id="s2">
+  <h2>Problem &amp; Solution</h2>
+  <div class="grid-2">
+    <div class="card">
+      <h3>The Problem</h3>
+      <ul>
+        <li>Academic references live in Zotero</li>
+        <li>Blog writing happens in Claude</li>
+        <li>Manual copy-paste of citations, text, figures</li>
+        <li>No semantic search across your library</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>The Solution</h3>
+      <ul>
+        <li>MCP server bridges Zotero ↔ Claude</li>
+        <li>9 tools for search, read, crop, cite</li>
+        <li>Semantic search via vector embeddings</li>
+        <li>Figures returned as inline images</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- Slide 3: Architecture -->
+<div class="slide" id="s3">
+  <h2>Architecture</h2>
+  <pre><code>┌──────────────────┐     stdio      ┌─────────────────────────┐
+│  Claude Desktop  │◄──────────────►│  mcp-local-reference    │
+│  (MCP Client)    │  MCP protocol  │  (MCP Server)           │
+└──────────────────┘                └──────────┬──────────────┘
+                                               │
+                                    ┌──────────┼──────────────┐
+                                    │          │              │
+                              ┌─────▼─────┐ ┌─▼──────┐ ┌─────▼─────┐
+                              │  Zotero   │ │ Zotero │ │ ChromaDB  │
+                              │  SQLite   │ │ PDFs   │ │ (vector)  │
+                              │  (read)   │ │ (read) │ │ (r/w)     │
+                              └───────────┘ └────────┘ └───────────┘</code></pre>
+  <table>
+    <tr><th>Layer</th><th>Directory</th><th>Responsibility</th></tr>
+    <tr><td>Entry</td><td><code>__main__.py</code></td><td>Creates server, runs stdio</td></tr>
+    <tr><td>Server</td><td><code>server.py</code></td><td>FastMCP instance, tool registration</td></tr>
+    <tr><td>Tools</td><td><code>tools/</code></td><td>MCP tool definitions</td></tr>
+    <tr><td>Services</td><td><code>services/</code></td><td>Business logic</td></tr>
+  </table>
+</div>
+
+<!-- Slide 4: MCP Tools -->
+<div class="slide" id="s4">
+  <h2>MCP Tools (9 total)</h2>
+  <table>
+    <tr><th>Tool</th><th>Purpose</th><th>Returns</th></tr>
+    <tr><td><code>search_references</code></td><td>Keyword or semantic search</td><td>JSON array</td></tr>
+    <tr><td><code>get_reference</code></td><td>Full metadata by item key</td><td>JSON object</td></tr>
+    <tr><td><code>list_collections</code></td><td>Zotero folder tree</td><td>JSON tree</td></tr>
+    <tr><td><code>get_collection_items</code></td><td>Items in a collection</td><td>JSON array</td></tr>
+    <tr><td><code>get_pdf_text</code></td><td>Extract text from PDF</td><td>Text by page</td></tr>
+    <tr><td><code>list_figures</code></td><td>Detect figures in PDF</td><td>JSON array</td></tr>
+    <tr><td><code>crop_figure</code></td><td>Crop page region as image</td><td>PNG (base64)</td></tr>
+    <tr><td><code>format_citation</code></td><td>Harvard Cite Them Right</td><td>String</td></tr>
+    <tr><td><code>index_library</code></td><td>Build vector index</td><td>Status JSON</td></tr>
+  </table>
+</div>
+
+<!-- Slide 5: Tech Stack -->
+<div class="slide" id="s5">
+  <h2>Tech Stack</h2>
+  <div class="grid-2">
+    <div class="card">
+      <h3>Core</h3>
+      <table>
+        <tr><td><code>mcp[cli]</code></td><td>MCP server framework</td></tr>
+        <tr><td><code>pymupdf</code></td><td>PDF processing</td></tr>
+        <tr><td><code>pillow</code></td><td>Image cropping</td></tr>
+        <tr><td><code>chromadb</code></td><td>Vector search</td></tr>
+      </table>
+    </div>
+    <div class="card">
+      <h3>Dev &amp; Infra</h3>
+      <table>
+        <tr><td><code>pytest</code></td><td>Testing (22 tests)</td></tr>
+        <tr><td><code>ruff</code></td><td>Lint + format</td></tr>
+        <tr><td><code>mypy</code></td><td>Type checking</td></tr>
+        <tr><td>Docker</td><td>Distribution</td></tr>
+        <tr><td>GitHub Actions</td><td>CI pipeline</td></tr>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Slide 6: Getting Started -->
+<div class="slide" id="s6">
+  <h2>Getting Started</h2>
+  <h3>1. Install</h3>
+  <pre><code>git clone https://github.com/YOUR_USERNAME/mcp-local-reference.git
+cd mcp-local-reference
+pip install -e .</code></pre>
+  <h3>2. Configure Claude Desktop</h3>
+  <pre><code>{
+  "mcpServers": {
+    "local-reference": {
+      "command": "/path/to/.venv/bin/python",
+      "args": ["-m", "mcp_local_reference"]
+    }
+  }
+}</code></pre>
+  <h3>3. Use</h3>
+  <ul>
+    <li>"Index my library for semantic search"</li>
+    <li>"Search for papers about transformer architectures"</li>
+    <li>"Crop figure 2 from this paper"</li>
+    <li>"Format a Harvard citation for this reference"</li>
+  </ul>
+</div>
+
+<div class="nav">
+  <button onclick="prev()">← Prev</button>
+  <button onclick="next()">Next →</button>
+</div>
+<div class="counter" id="counter"></div>
+
+<script>
+  const slides = document.querySelectorAll('.slide');
+  let current = 0;
+  function show(n) {
+    slides[current].classList.remove('active');
+    current = (n + slides.length) % slides.length;
+    slides[current].classList.add('active');
+    document.getElementById('counter').textContent = `${current + 1} / ${slides.length}`;
+  }
+  function next() { show(current + 1); }
+  function prev() { show(current - 1); }
+  document.addEventListener('keydown', e => {
+    if (e.key === 'ArrowRight' || e.key === ' ') next();
+    if (e.key === 'ArrowLeft') prev();
+  });
+  show(0);
+</script>
+</body>
+</html>

@@ -1,33 +1,46 @@
+# Python bytecode
 __pycache__/
 *.py[cod]
 *$py.class
+
+# Packaging
 *.egg-info/
 *.egg
 dist/
 build/
 .eggs/
-
 *.so
 
+# Virtual environments
 .Python
 env/
 venv/
 .venv/
 ENV/
 
+# Linting / typing / testing caches
 .mypy_cache/
 .ruff_cache/
 .pytest_cache/
 
-*.log
+# OS files
 .DS_Store
 Thumbs.db
 
+# Logs
+*.log
+
+# Environment / secrets
 .env
 .env.local
 
+# Zotero database files (never commit user data)
 *.sqlite
 *.sqlite-journal
 
+# Server runtime data
 .mcp-local-reference/
 chroma/
+
+# Audit working directories
+docs/project/.audit/

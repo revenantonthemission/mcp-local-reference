@@ -1,6 +1,10 @@
+<!-- SCOPE: Project summary, structure, key commands, and conventions for AI coding assistants -->
+
 # mcp-local-reference
 
 MCP server for accessing Zotero references, PDFs, and figures. Built with Python + FastMCP.
+
+> Full documentation: [docs/README.md](docs/README.md)
 
 ## Project Structure
 
@@ -8,7 +12,7 @@ MCP server for accessing Zotero references, PDFs, and figures. Built with Python
   - `server.py` — FastMCP server creation
   - `config.py` — env-var based configuration
   - `tools/` — MCP tool definitions (references, pdf_reader, figures)
-  - `services/` — business logic (zotero_client, pdf_processor, image_processor, vector_store)
+  - `services/` — business logic (zotero_client, pdf_processor, vector_store)
 - `tests/` — pytest suite with mock Zotero DB fixture
 
 ## Key Commands
@@ -44,3 +48,5 @@ python -m mcp_local_reference
 - Tools are registered via `register_tools(mcp, config)` functions
 - Services are stateless (connections created per-call for Zotero)
 - Tests use a mock SQLite DB in `conftest.py` — no real Zotero needed
+
+<!-- Maintenance: Update when project structure, commands, or conventions change -->
