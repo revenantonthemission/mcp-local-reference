@@ -37,6 +37,9 @@ class Config:
     min_figure_pixels: int = field(
         default_factory=lambda: int(os.environ.get("MIN_FIGURE_PIXELS", "10000"))
     )
+    local_pdf_dir: Path | None = field(
+        default_factory=lambda: Path(d) if (d := os.environ.get("LOCAL_PDF_DIR")) else None
+    )
 
     @property
     def zotero_db_path(self) -> Path:

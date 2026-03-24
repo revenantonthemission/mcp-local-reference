@@ -11,11 +11,22 @@ from mcp_local_reference.config import Config
 from mcp_local_reference.services.pdf_processor import PdfProcessor
 
 
-def _validate_pdf_path(file_path: str) -> Path:
-    """Resolve and validate a user-supplied PDF path."""
-    p = Path(file_path).expanduser().resolve()
+def _resolve_pdf_path(file_path: str, base_dir: Path | None) -> Path:
+    """Resolve a user-supplied PDF path, trying base_dir for relative names."""
+    p = Path(file_path).expanduser()
+
+    # If not absolute and a base directory is configured, resolve against it
+    if not p.is_absolute() and base_dir is not None:
+        candidate = (base_dir / p).resolve()
+        if candidate.exists():
+            p = candidate
+
+    p = p.resolve()
     if not p.exists():
-        raise ValueError(f"File not found: {p}")
+        hint = ""
+        if base_dir and not Path(file_path).is_absolute():
+            hint = f" (searched in {base_dir})"
+        raise ValueError(f"File not found: {p}{hint}")
     if not p.is_file():
         raise ValueError(f"Not a file: {p}")
     if p.suffix.lower() != ".pdf":
@@ -26,6 +37,7 @@ def _validate_pdf_path(file_path: str) -> Path:
 def register_tools(mcp: FastMCP, config: Config) -> None:
     """Register tools for reading arbitrary local PDFs."""
     pdf = PdfProcessor(min_figure_pixels=config.min_figure_pixels)
+    base_dir = config.local_pdf_dir
 
     @mcp.tool()
     def read_local_pdf(
@@ -36,14 +48,15 @@ def register_tools(mcp: FastMCP, config: Config) -> None:
         """Extract text from any PDF file on the local machine.
 
         Use this for PDFs that are NOT managed by Zotero — e.g. files in
-        ~/Documents, ~/Downloads, or any other folder.
+        ~/Documents, ~/Downloads, or any other folder.  If LOCAL_PDF_DIR is
+        set, relative filenames are resolved against that directory.
 
         Args:
-            file_path: Absolute or ~-relative path to the PDF file.
+            file_path: Path to the PDF (absolute, ~-relative, or relative to LOCAL_PDF_DIR).
             start_page: First page to extract (0-indexed, default: first page).
             end_page: Last page to extract (exclusive, default: last page).
         """
-        p = _validate_pdf_path(file_path)
+        p = _resolve_pdf_path(file_path, base_dir)
         page_count = pdf.get_page_count(p)
         text = pdf.extract_text(p, start_page, end_page)
 
@@ -66,9 +79,9 @@ def register_tools(mcp: FastMCP, config: Config) -> None:
         to extract a specific figure.
 
         Args:
-            file_path: Absolute or ~-relative path to the PDF file.
+            file_path: Path to the PDF (absolute, ~-relative, or relative to LOCAL_PDF_DIR).
         """
-        p = _validate_pdf_path(file_path)
+        p = _resolve_pdf_path(file_path, base_dir)
         figures = pdf.detect_figures(p)
 
         return json.dumps(
@@ -104,7 +117,7 @@ def register_tools(mcp: FastMCP, config: Config) -> None:
         Use ``list_local_figures`` first to find figure locations.
 
         Args:
-            file_path: Absolute or ~-relative path to the PDF file.
+            file_path: Path to the PDF (absolute, ~-relative, or relative to LOCAL_PDF_DIR).
             page: Page number (0-indexed).
             x0: Left edge of the crop box (PDF points).
             y0: Top edge of the crop box (PDF points).
@@ -112,6 +125,6 @@ def register_tools(mcp: FastMCP, config: Config) -> None:
             y1: Bottom edge of the crop box (PDF points).
             dpi: Rendering resolution (default 300).
         """
-        p = _validate_pdf_path(file_path)
+        p = _resolve_pdf_path(file_path, base_dir)
         png_bytes = pdf.render_page_region(p, page, (x0, y0, x1, y1), dpi)
         return Image(data=png_bytes, format="png")
