@@ -5,7 +5,7 @@ from __future__ import annotations
 from mcp.server.fastmcp import FastMCP
 
 from mcp_local_reference.config import Config
-from mcp_local_reference.tools import figures, pdf_reader, references
+from mcp_local_reference.tools import figures, local_pdf, pdf_reader, references
 
 
 def create_server() -> FastMCP:
@@ -16,5 +16,6 @@ def create_server() -> FastMCP:
     references.register_tools(mcp, config)
     pdf_reader.register_tools(mcp, config)
     figures.register_tools(mcp, config)
+    local_pdf.register_tools(mcp, config)
 
     return mcp
