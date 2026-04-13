@@ -8,14 +8,25 @@
 |---------|---------|
 | `pytest -v` | Run all tests with verbose output |
 | `pytest tests/test_zotero_client.py` | Run only Zotero client tests |
+| `pytest tests/code_mcp/` | Run only code-mcp tests |
 | `pytest -k "test_search"` | Run tests matching a keyword |
 
 ## Test Structure
+
+### mcp-local-reference
 
 | File | Tests | Fixture |
 |------|-------|---------|
 | `test_zotero_client.py` | Search, get reference, collections, get all | Mock Zotero SQLite DB |
 | `test_pdf_processor.py` | Text extraction, page count, region rendering | Generated single-page PDF |
+
+### code-mcp (`tests/code_mcp/`)
+
+| File | Tests | Fixture |
+|------|-------|---------|
+| `test_parser.py` | Symbol extraction, doc chunking, fallback, edge cases | Temp source files |
+| `test_code_fts.py` | Repo/file CRUD, FTS5 search, batch insert, stats | Temp SQLite DB |
+| `test_code_manager.py` | Indexing, keyword search, exclusions, reindex, remove | Mock repo + mock embedder |
 
 ## Test Strategy
 
@@ -27,6 +38,9 @@
 | Tools (`tools/`) | Not directly tested — thin wrappers over services |
 | Config (`config.py`) | Tested implicitly via service tests |
 | Server (`server.py`) | Smoke-tested by running `python -m mcp_local_reference` |
+| code-mcp Parser | Unit tests with temp files; tree-sitter tests skipped if not installed |
+| code-mcp FTS Index | Unit tests with temp SQLite database |
+| code-mcp Manager | Integration tests with real parser + FTS, mocked embedder |
 
 ### Mock Zotero Database
 
@@ -48,6 +62,8 @@ The `conftest.py` fixture creates an in-memory SQLite database with:
 | Real Zotero database | User-specific; no mock can cover all schema variations |
 | MCP protocol transport | Covered by the `mcp` SDK's own tests |
 | Docker builds | Tested in CI pipeline |
+| code-mcp vector embeddings | Requires `sentence-transformers` + `lancedb`; mocked in tests |
+| code-mcp file watcher | Requires filesystem events with timing; tested manually |
 
 ## Adding Tests
 

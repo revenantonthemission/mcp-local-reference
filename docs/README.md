@@ -13,6 +13,14 @@
 | [Tech Stack](project/tech_stack.md) | Technology choices and versions |
 | [Infrastructure](project/infrastructure.md) | Docker, CI/CD, environment configuration |
 
+## Code MCP Server
+
+| Document | Purpose |
+|----------|---------|
+| [Code MCP Hub](code_mcp/README.md) | Documentation hub for the code-mcp server |
+| [Architecture](code_mcp/architecture.md) | Indexing pipeline, search modes, schema |
+| [Usage](code_mcp/usage.md) | Configuration, CLI commands, MCP tools |
+
 ## Reference
 
 | Resource | Purpose |
