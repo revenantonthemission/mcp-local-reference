@@ -36,12 +36,20 @@ class CodeFTSIndex:
     def __init__(self, db_path: Path | None = None):
         self.db_path = db_path or settings.index_db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._conn: sqlite3.Connection | None = None
         self._init_db()
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(str(self.db_path))
-        conn.row_factory = sqlite3.Row
-        return conn
+        if self._conn is None:
+            self._conn = sqlite3.connect(str(self.db_path))
+            self._conn.row_factory = sqlite3.Row
+        return self._conn
+
+    def close(self) -> None:
+        """Close the persistent connection."""
+        if self._conn is not None:
+            self._conn.close()
+            self._conn = None
 
     def _init_db(self) -> None:
         with self._connect() as conn:

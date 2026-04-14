@@ -288,6 +288,21 @@ class TestGetSymbolByName:
         assert fts_index.get_symbol_by_name("repo", "m.py", "ghost") == []
 
 
+class TestPersistentConnection:
+    def test_connect_returns_same_connection(self, fts_index: CodeFTSIndex) -> None:
+        conn1 = fts_index._connect()
+        conn2 = fts_index._connect()
+        assert conn1 is conn2
+
+    def test_close_closes_connection(self, fts_index: CodeFTSIndex) -> None:
+        fts_index.close()
+        # After close, a new connection should be created
+        conn = fts_index._connect()
+        # Should work fine — new connection created
+        row = conn.execute("SELECT 1").fetchone()
+        assert row[0] == 1
+
+
 class TestComputeFileHash:
     def test_consistent_hash(self, tmp_dir: Path) -> None:
         f = tmp_dir / "test.py"
