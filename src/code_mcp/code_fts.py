@@ -96,6 +96,10 @@ class CodeFTSIndex:
                     tokenize='porter unicode61'
                 );
 
+                -- Index on file_id for fast DELETE/lookup by file
+                CREATE INDEX IF NOT EXISTS idx_symbols_file_id
+                    ON code_symbols(file_id);
+
                 -- Triggers for FTS sync
                 -- Migration: add parent_name column if missing
                 -- (safe to run repeatedly — ALTER TABLE IF NOT EXISTS not supported,
@@ -166,7 +170,8 @@ class CodeFTSIndex:
                 )
 
             conn.execute(
-                "INSERT INTO code_files (repo_id, rel_path, language, size_bytes, file_hash, file_mtime) "
+                "INSERT INTO code_files "
+                "(repo_id, rel_path, language, size_bytes, file_hash, file_mtime) "
                 "VALUES (?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(repo_id, rel_path) DO UPDATE SET "
                 "language=excluded.language, size_bytes=excluded.size_bytes, "
@@ -187,10 +192,7 @@ class CodeFTSIndex:
                 "SELECT rel_path, file_hash, file_mtime FROM code_files WHERE repo_id = ?",
                 (repo_id,),
             ).fetchall()
-            return {
-                row["rel_path"]: (row["file_hash"], row["file_mtime"])
-                for row in rows
-            }
+            return {row["rel_path"]: (row["file_hash"], row["file_mtime"]) for row in rows}
 
     def update_mtimes_batch(self, repo_id: int, updates: list[tuple[str, float]]) -> None:
         """Batch-update file_mtime for files whose hash matched but mtime was stale."""
@@ -269,7 +271,8 @@ class CodeFTSIndex:
                     )
 
                 conn.execute(
-                    "INSERT INTO code_files (repo_id, rel_path, language, size_bytes, file_hash, file_mtime) "
+                    "INSERT INTO code_files "
+                    "(repo_id, rel_path, language, size_bytes, file_hash, file_mtime) "
                     "VALUES (?, ?, ?, ?, ?, ?) "
                     "ON CONFLICT(repo_id, rel_path) DO UPDATE SET "
                     "language=excluded.language, size_bytes=excluded.size_bytes, "
@@ -289,10 +292,19 @@ class CodeFTSIndex:
                 file_id = file_id_map[rel_path]
                 for s in symbols:
                     s.file_id = file_id
-                    all_symbol_rows.append((
-                        file_id, s.name, s.symbol_type, s.signature,
-                        s.text, s.start_line, s.end_line, s.language, s.parent_name,
-                    ))
+                    all_symbol_rows.append(
+                        (
+                            file_id,
+                            s.name,
+                            s.symbol_type,
+                            s.signature,
+                            s.text,
+                            s.start_line,
+                            s.end_line,
+                            s.language,
+                            s.parent_name,
+                        )
+                    )
                 results.append((file_id, symbols))
 
             if all_symbol_rows:

@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
 from code_mcp.code_fts import CodeFTSIndex
-from code_mcp.code_manager import CodeIndexManager, DEFAULT_EXCLUDE_PATTERNS
+from code_mcp.code_manager import DEFAULT_EXCLUDE_PATTERNS, CodeIndexManager
 from code_mcp.parser import TreeSitterParser
 
 
@@ -66,9 +67,7 @@ class TestIndexRepo:
         assert stats2["skipped"] == stats1["indexed"] + stats1["skipped"]
         assert stats2["indexed"] == 0
 
-    def test_rebuild_forces_reindex(
-        self, manager: CodeIndexManager, sample_repo: Path
-    ) -> None:
+    def test_rebuild_forces_reindex(self, manager: CodeIndexManager, sample_repo: Path) -> None:
         manager.index_repo(sample_repo, skip_vectors=True)
         stats = manager.index_repo(sample_repo, skip_vectors=True, rebuild=True)
 
@@ -139,24 +138,21 @@ class TestSemanticSearch:
 
 class TestFileExclusion:
     def test_hidden_files_excluded(self, manager: CodeIndexManager) -> None:
-        assert manager._should_exclude(
-            Path("/repo/.hidden/file.py"), Path("/repo")
-        ) is True
+        assert manager._should_exclude(Path("/repo/.hidden/file.py"), Path("/repo")) is True
 
     def test_node_modules_excluded(self, manager: CodeIndexManager) -> None:
-        assert manager._should_exclude(
-            Path("/repo/node_modules/pkg/index.js"), Path("/repo")
-        ) is True
+        assert (
+            manager._should_exclude(Path("/repo/node_modules/pkg/index.js"), Path("/repo")) is True
+        )
 
     def test_pycache_excluded(self, manager: CodeIndexManager) -> None:
-        assert manager._should_exclude(
-            Path("/repo/__pycache__/mod.cpython-311.pyc"), Path("/repo")
-        ) is True
+        assert (
+            manager._should_exclude(Path("/repo/__pycache__/mod.cpython-311.pyc"), Path("/repo"))
+            is True
+        )
 
     def test_regular_file_not_excluded(self, manager: CodeIndexManager) -> None:
-        assert manager._should_exclude(
-            Path("/repo/src/main.py"), Path("/repo")
-        ) is False
+        assert manager._should_exclude(Path("/repo/src/main.py"), Path("/repo")) is False
 
     def test_all_default_patterns_excluded(self, manager: CodeIndexManager) -> None:
         for pattern in DEFAULT_EXCLUDE_PATTERNS:
@@ -167,24 +163,18 @@ class TestFileExclusion:
 
 
 class TestReindexFile:
-    def test_reindexes_single_file(
-        self, manager: CodeIndexManager, sample_repo: Path
-    ) -> None:
+    def test_reindexes_single_file(self, manager: CodeIndexManager, sample_repo: Path) -> None:
         result = manager.reindex_file("sample-repo", sample_repo, sample_repo / "main.py")
         assert result == "indexed"
 
-    def test_skips_unchanged_file(
-        self, manager: CodeIndexManager, sample_repo: Path
-    ) -> None:
+    def test_skips_unchanged_file(self, manager: CodeIndexManager, sample_repo: Path) -> None:
         manager.reindex_file("sample-repo", sample_repo, sample_repo / "main.py")
         result = manager.reindex_file("sample-repo", sample_repo, sample_repo / "main.py")
         assert result == "skipped"
 
 
 class TestRemoveFileByPath:
-    def test_removes_indexed_file(
-        self, manager: CodeIndexManager, sample_repo: Path
-    ) -> None:
+    def test_removes_indexed_file(self, manager: CodeIndexManager, sample_repo: Path) -> None:
         manager.index_repo(sample_repo, skip_vectors=True)
         removed = manager.remove_file_by_path("sample-repo", "main.py")
         assert removed is True
@@ -214,15 +204,10 @@ class TestGetStats:
 
 
 class TestRemoveRepo:
-    def test_removes_repo(
-        self, manager: CodeIndexManager, sample_repo: Path
-    ) -> None:
+    def test_removes_repo(self, manager: CodeIndexManager, sample_repo: Path) -> None:
         manager.index_repo(sample_repo, skip_vectors=True)
         manager.remove_repo("sample-repo")
         assert manager.list_repos() == []
-
-
-import time
 
 
 class TestMtimeSkipping:

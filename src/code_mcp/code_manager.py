@@ -120,7 +120,9 @@ class CodeIndexManager:
                 else:
                     # Add current_mtime to the tuple for batch write
                     rel_path_r, language, size_bytes, fh, symbols = result
-                    parsed_files.append((rel_path_r, language, size_bytes, fh, current_mtime, symbols))
+                    parsed_files.append(
+                        (rel_path_r, language, size_bytes, fh, current_mtime, symbols)
+                    )
                     stats["indexed"] += 1
                     stats["symbols"] += len(symbols)
             except Exception as e:
