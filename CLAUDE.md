@@ -2,7 +2,7 @@
 
 # mcp-local-reference
 
-MCP server for accessing Zotero references, PDFs, and figures. Built with Python + FastMCP.
+MCP server for accessing Zotero references, PDFs, and figures, plus a source code indexing & search server. Built with Python + FastMCP / MCP SDK.
 
 > Full documentation: [docs/README.md](docs/README.md)
 
@@ -11,7 +11,7 @@ MCP server for accessing Zotero references, PDFs, and figures. Built with Python
 - `src/mcp_local_reference/` — package root
   - `server.py` — FastMCP server creation
   - `config.py` — env-var based configuration
-  - `tools/` — MCP tool definitions (references, pdf_reader, figures)
+  - `tools/` — MCP tool definitions (references, pdf_reader, figures, local_pdf)
   - `services/` — business logic (zotero_client, pdf_processor, vector_store)
 - `src/code_mcp/` — source code indexing & search MCP server
   - `server.py` — MCP server (search_code, list_repos, get_symbol tools)
@@ -27,6 +27,8 @@ MCP server for accessing Zotero references, PDFs, and figures. Built with Python
 ```bash
 # Install
 uv pip install -e ".[dev]"
+# Install with code search deps (tree-sitter, sentence-transformers, lancedb)
+uv pip install -e ".[dev,full]"
 
 # Test
 uv run pytest -v
@@ -37,16 +39,28 @@ uv run ruff format src/ tests/
 
 # Run server directly
 python -m mcp_local_reference
+
+# Index source code repos (requires [full] extras)
+uv run code-mcp-index
+uv run code-mcp-index --skip-vectors  # FTS only, ~10x faster
 ```
 
 ## Architecture
 
+### mcp_local_reference
 - **Transport:** stdio (for Claude Desktop)
 - **Zotero access:** Read-only SQLite with `?mode=ro`
 - **Vector search:** ChromaDB with default ONNX embeddings
 - **PDF processing:** PyMuPDF (fitz)
 - **Image processing:** Pillow
 - **Citation style:** Harvard Cite Them Right
+
+### code_mcp
+- **Transport:** stdio (raw MCP SDK `Server`, not FastMCP)
+- **Indexing:** 2-phase — Phase 1: tree-sitter parsing + SQLite FTS5, Phase 2: vector embedding
+- **FTS:** SQLite FTS5 with persistent connection, mtime-based incremental skip
+- **Vector search:** LanceDB with sentence-transformers (default: all-MiniLM-L12-v2)
+- **Config:** `CODE_MCP_` env prefix via pydantic-settings
 
 ## Conventions
 
@@ -56,5 +70,6 @@ python -m mcp_local_reference
 - Tools are registered via `register_tools(mcp, config)` functions
 - Services are stateless (connections created per-call for Zotero)
 - Tests use a mock SQLite DB in `conftest.py` — no real Zotero needed
+- code_mcp tests use `tests/code_mcp/conftest.py` with sample repo fixture
 
 <!-- Maintenance: Update when project structure, commands, or conventions change -->
