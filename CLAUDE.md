@@ -13,6 +13,13 @@ MCP server for accessing Zotero references, PDFs, and figures. Built with Python
   - `config.py` — env-var based configuration
   - `tools/` — MCP tool definitions (references, pdf_reader, figures)
   - `services/` — business logic (zotero_client, pdf_processor, vector_store)
+- `src/code_mcp/` — source code indexing & search MCP server
+  - `server.py` — MCP server (search_code, list_repos, get_symbol tools)
+  - `cli.py` — `code-mcp-index` CLI for indexing repos
+  - `code_manager.py` — indexing facade (2-phase: FTS then vector embedding)
+  - `code_fts.py` — SQLite FTS5 index with persistent connection
+  - `code_embedder.py` — LanceDB vector embeddings via sentence-transformers
+  - `parser.py` — tree-sitter symbol extraction
 - `tests/` — pytest suite with mock Zotero DB fixture
 
 ## Key Commands
@@ -22,11 +29,11 @@ MCP server for accessing Zotero references, PDFs, and figures. Built with Python
 uv pip install -e ".[dev]"
 
 # Test
-pytest -v
+uv run pytest -v
 
 # Lint
-ruff check src/ tests/
-ruff format src/ tests/
+uv run ruff check src/ tests/
+uv run ruff format src/ tests/
 
 # Run server directly
 python -m mcp_local_reference
@@ -44,6 +51,7 @@ python -m mcp_local_reference
 ## Conventions
 
 - Python 3.11+, type hints everywhere
+- Line length: 100 (enforced by ruff)
 - `from __future__ import annotations` in every module
 - Tools are registered via `register_tools(mcp, config)` functions
 - Services are stateless (connections created per-call for Zotero)
