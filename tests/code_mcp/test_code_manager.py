@@ -220,3 +220,50 @@ class TestRemoveRepo:
         manager.index_repo(sample_repo, skip_vectors=True)
         manager.remove_repo("sample-repo")
         assert manager.list_repos() == []
+
+
+import time
+
+
+class TestMtimeSkipping:
+    def test_second_run_uses_mtime_to_skip(
+        self, manager: CodeIndexManager, sample_repo: Path
+    ) -> None:
+        """Second indexing run should skip unchanged files via mtime (no file reads)."""
+        stats1 = manager.index_repo(sample_repo, skip_vectors=True)
+        assert stats1["indexed"] > 0
+
+        stats2 = manager.index_repo(sample_repo, skip_vectors=True)
+        # All files skipped on second run
+        assert stats2["skipped"] == stats1["total"]
+        assert stats2["indexed"] == 0
+
+    def test_modified_file_gets_reindexed(
+        self, manager: CodeIndexManager, sample_repo: Path
+    ) -> None:
+        """A file with changed mtime and content should be re-indexed."""
+        manager.index_repo(sample_repo, skip_vectors=True)
+
+        # Modify a file (changes both mtime and hash)
+        target = sample_repo / "main.py"
+        time.sleep(0.05)  # ensure mtime changes
+        target.write_text("def new_func():\n    return 'changed'\n")
+
+        stats = manager.index_repo(sample_repo, skip_vectors=True)
+        assert stats["indexed"] >= 1
+
+    def test_touched_file_with_same_content_skipped(
+        self, manager: CodeIndexManager, sample_repo: Path
+    ) -> None:
+        """A file whose mtime changed but content is identical should be skipped."""
+        manager.index_repo(sample_repo, skip_vectors=True)
+
+        # Touch file to change mtime without changing content
+        target = sample_repo / "main.py"
+        content = target.read_text()
+        time.sleep(0.05)
+        target.write_text(content)
+
+        stats = manager.index_repo(sample_repo, skip_vectors=True)
+        # The touched file should be skipped (hash matches), others skipped by mtime
+        assert stats["indexed"] == 0

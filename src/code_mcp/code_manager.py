@@ -84,21 +84,45 @@ class CodeIndexManager:
 
         stats = {"total": total, "indexed": 0, "skipped": 0, "failed": 0, "symbols": 0}
 
-        # Phase 1a: Parse files (hash check + tree-sitter, no DB writes)
-        parsed_files: list[tuple[str, str, int, str, list]] = []
+        # Phase 1a: Parse files (mtime-first skip, then hash check)
+        parsed_files: list[tuple[str, str, int, str, float | None, list]] = []
+        existing_hashes = self.fts_index.get_all_file_hashes(repo_id)
+        mtime_updates: list[tuple[str, float]] = []  # files with stale mtime but same hash
 
         for i, file_path in enumerate(files, 1):
             rel_path = str(file_path.relative_to(repo_path))
             try:
-                result = self._parse_file_for_index(repo_id, file_path, rel_path, rebuild)
-                if result == "skipped":
-                    stats["skipped"] += 1
-                elif result == "failed":
+                current_mtime = file_path.stat().st_mtime
+
+                # Fast path: check mtime first
+                stored = existing_hashes.get(rel_path)
+                if not rebuild and stored is not None:
+                    stored_hash, stored_mtime = stored
+                    if stored_mtime is not None and stored_mtime == current_mtime:
+                        # mtime matches — skip without reading file
+                        stats["skipped"] += 1
+                        continue
+
+                    # mtime differs — check hash
+                    file_hash = CodeFTSIndex.compute_file_hash(file_path)
+                    if stored_hash == file_hash:
+                        # Content unchanged, just mtime drift — update mtime, skip
+                        mtime_updates.append((rel_path, current_mtime))
+                        stats["skipped"] += 1
+                        continue
+                else:
+                    file_hash = CodeFTSIndex.compute_file_hash(file_path)
+
+                # File is new or changed — parse it
+                result = self._parse_file_for_index(file_path, rel_path, file_hash)
+                if result == "failed":
                     stats["failed"] += 1
                 else:
-                    parsed_files.append(result)
+                    # Add current_mtime to the tuple for batch write
+                    rel_path_r, language, size_bytes, fh, symbols = result
+                    parsed_files.append((rel_path_r, language, size_bytes, fh, current_mtime, symbols))
                     stats["indexed"] += 1
-                    stats["symbols"] += len(result[4])  # symbols list
+                    stats["symbols"] += len(symbols)
             except Exception as e:
                 logger.error(f"[{i}/{total}] Failed {rel_path}: {e}")
                 stats["failed"] += 1
@@ -108,6 +132,10 @@ class CodeIndexManager:
                     f"  Phase 1a parse: {i}/{total} files "
                     f"({stats['indexed']} parsed, {stats['skipped']} skipped)"
                 )
+
+        # Batch-update mtimes for files that had stale mtime but matching hash
+        if mtime_updates:
+            self.fts_index.update_mtimes_batch(repo_id, mtime_updates)
 
         # Phase 1b: Batch write to FTS (single transaction)
         file_symbols: list[tuple[int, list]] = []
@@ -159,19 +187,14 @@ class CodeIndexManager:
 
     def _parse_file_for_index(
         self,
-        repo_id: int,
         file_path: Path,
         rel_path: str,
-        rebuild: bool,
+        file_hash: str,
     ) -> tuple[str, str, int, str, list] | str:
         """Parse a file for batch indexing (no DB writes).
 
-        Returns (rel_path, language, size_bytes, file_hash, symbols) or "skipped"/"failed".
+        Returns (rel_path, language, size_bytes, file_hash, symbols) or "failed".
         """
-        file_hash = CodeFTSIndex.compute_file_hash(file_path)
-        if not rebuild and not self.fts_index.needs_indexing(repo_id, rel_path, file_hash):
-            return "skipped"
-
         if self.parser.can_parse(file_path) or self.parser.is_doc_file(file_path):
             symbols = self.parser.parse_file(file_path)
         else:
