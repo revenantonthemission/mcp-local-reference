@@ -237,10 +237,16 @@ class CodeEmbedder:
             done = min(batch_start + batch_size, total)
             logger.info(f"  Embedded {done}/{total} symbols ({done * 100 // total}%)")
 
-        # Write all data as a single new table, replacing any existing one.
-        # mode="overwrite" is atomic and avoids the per-file delete loop that
-        # created thousands of LanceDB version manifests.
-        self.db.create_table(table_name, all_data, mode="overwrite")
+        # Incremental write: only update changed files, preserve existing embeddings
+        if table_name in self.db.table_names():
+            table = self.db.open_table(table_name)
+            # Delete old embeddings for changed files
+            changed_file_ids = list({item[0] for item in all_items})
+            id_list = ", ".join(str(fid) for fid in changed_file_ids)
+            table.delete(f"file_id IN ({id_list})")
+            table.add(all_data)
+        else:
+            self.db.create_table(table_name, all_data)
 
         logger.info(f"Batch embedding complete: {total} symbols stored")
         return total
