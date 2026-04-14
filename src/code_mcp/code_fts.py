@@ -105,6 +105,9 @@ class CodeFTSIndex:
             with contextlib.suppress(sqlite3.OperationalError):
                 conn.execute("ALTER TABLE code_symbols ADD COLUMN parent_name TEXT DEFAULT ''")
 
+            with contextlib.suppress(sqlite3.OperationalError):
+                conn.execute("ALTER TABLE code_files ADD COLUMN file_mtime REAL")
+
             conn.executescript("""
                 CREATE TRIGGER IF NOT EXISTS code_symbols_ai AFTER INSERT ON code_symbols
                 BEGIN
@@ -148,10 +151,10 @@ class CodeFTSIndex:
         language: str,
         size_bytes: int,
         file_hash: str,
+        file_mtime: float | None = None,
     ) -> int:
         """Insert or update a file record, return file_id."""
         with self._connect() as conn:
-            # Remove old symbols if file exists
             existing = conn.execute(
                 "SELECT file_id FROM code_files WHERE repo_id = ? AND rel_path = ?",
                 (repo_id, rel_path),
@@ -163,18 +166,41 @@ class CodeFTSIndex:
                 )
 
             conn.execute(
-                "INSERT INTO code_files (repo_id, rel_path, language, size_bytes, file_hash) "
-                "VALUES (?, ?, ?, ?, ?) "
+                "INSERT INTO code_files (repo_id, rel_path, language, size_bytes, file_hash, file_mtime) "
+                "VALUES (?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(repo_id, rel_path) DO UPDATE SET "
                 "language=excluded.language, size_bytes=excluded.size_bytes, "
-                "file_hash=excluded.file_hash, indexed_at=datetime('now')",
-                (repo_id, rel_path, language, size_bytes, file_hash),
+                "file_hash=excluded.file_hash, file_mtime=excluded.file_mtime, "
+                "indexed_at=datetime('now')",
+                (repo_id, rel_path, language, size_bytes, file_hash, file_mtime),
             )
             row = conn.execute(
                 "SELECT file_id FROM code_files WHERE repo_id = ? AND rel_path = ?",
                 (repo_id, rel_path),
             ).fetchone()
             return row["file_id"]
+
+    def get_all_file_hashes(self, repo_id: int) -> dict[str, tuple[str, float | None]]:
+        """Get all (rel_path -> (file_hash, file_mtime)) for a repo in one query."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT rel_path, file_hash, file_mtime FROM code_files WHERE repo_id = ?",
+                (repo_id,),
+            ).fetchall()
+            return {
+                row["rel_path"]: (row["file_hash"], row["file_mtime"])
+                for row in rows
+            }
+
+    def update_mtimes_batch(self, repo_id: int, updates: list[tuple[str, float]]) -> None:
+        """Batch-update file_mtime for files whose hash matched but mtime was stale."""
+        if not updates:
+            return
+        with self._connect() as conn:
+            conn.executemany(
+                "UPDATE code_files SET file_mtime = ? WHERE repo_id = ? AND rel_path = ?",
+                [(mtime, repo_id, rel_path) for rel_path, mtime in updates],
+            )
 
     def add_symbols(self, file_id: int, symbols: list) -> None:
         """Add symbols for a file (triggers update FTS automatically)."""
@@ -205,7 +231,7 @@ class CodeFTSIndex:
     def add_files_batch(
         self,
         repo_id: int,
-        files_data: list[tuple[str, str, int, str, list]],
+        files_data: list[tuple[str, str, int, str, float | None, list]],
     ) -> list[tuple[int, list]]:
         """Batch insert files and symbols in a single transaction.
 
@@ -214,7 +240,7 @@ class CodeFTSIndex:
 
         Args:
             repo_id: Repository ID.
-            files_data: List of (rel_path, language, size_bytes, file_hash, symbols).
+            files_data: List of (rel_path, language, size_bytes, file_hash, file_mtime, symbols).
 
         Returns:
             List of (file_id, symbols) tuples for downstream use (e.g. embedding).
@@ -231,7 +257,7 @@ class CodeFTSIndex:
 
             # Upsert files and collect file_ids
             file_id_map: dict[str, int] = {}
-            for rel_path, language, size_bytes, file_hash, symbols in files_data:
+            for rel_path, language, size_bytes, file_hash, file_mtime, symbols in files_data:
                 existing = conn.execute(
                     "SELECT file_id FROM code_files WHERE repo_id = ? AND rel_path = ?",
                     (repo_id, rel_path),
@@ -243,12 +269,13 @@ class CodeFTSIndex:
                     )
 
                 conn.execute(
-                    "INSERT INTO code_files (repo_id, rel_path, language, size_bytes, file_hash) "
-                    "VALUES (?, ?, ?, ?, ?) "
+                    "INSERT INTO code_files (repo_id, rel_path, language, size_bytes, file_hash, file_mtime) "
+                    "VALUES (?, ?, ?, ?, ?, ?) "
                     "ON CONFLICT(repo_id, rel_path) DO UPDATE SET "
                     "language=excluded.language, size_bytes=excluded.size_bytes, "
-                    "file_hash=excluded.file_hash, indexed_at=datetime('now')",
-                    (repo_id, rel_path, language, size_bytes, file_hash),
+                    "file_hash=excluded.file_hash, file_mtime=excluded.file_mtime, "
+                    "indexed_at=datetime('now')",
+                    (repo_id, rel_path, language, size_bytes, file_hash, file_mtime),
                 )
                 row = conn.execute(
                     "SELECT file_id FROM code_files WHERE repo_id = ? AND rel_path = ?",
@@ -258,7 +285,7 @@ class CodeFTSIndex:
 
             # Bulk insert ALL symbols in one executemany call
             all_symbol_rows: list[tuple] = []
-            for rel_path, language, size_bytes, file_hash, symbols in files_data:
+            for rel_path, language, size_bytes, file_hash, file_mtime, symbols in files_data:
                 file_id = file_id_map[rel_path]
                 for s in symbols:
                     s.file_id = file_id

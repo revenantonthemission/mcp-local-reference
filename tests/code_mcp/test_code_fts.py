@@ -233,8 +233,8 @@ class TestBatchInsert:
         repo_id = fts_index.upsert_repo("repo", Path("/tmp/repo"))
 
         files_data = [
-            ("a.py", "python", 100, "ha", [make_symbol(name="func_a")]),
-            ("b.py", "python", 200, "hb", [make_symbol(name="func_b")]),
+            ("a.py", "python", 100, "ha", None, [make_symbol(name="func_a")]),
+            ("b.py", "python", 200, "hb", None, [make_symbol(name="func_b")]),
         ]
         results = fts_index.add_files_batch(repo_id, files_data)
 
@@ -251,6 +251,7 @@ class TestBatchInsert:
                 "python",
                 100,
                 "hc",
+                None,
                 [make_symbol(name="batch_add", text="def batch_add(x, y): return x + y")],
             ),
         ]
@@ -301,6 +302,59 @@ class TestPersistentConnection:
         # Should work fine — new connection created
         row = conn.execute("SELECT 1").fetchone()
         assert row[0] == 1
+
+
+class TestMtimeAndBulkHash:
+    def test_upsert_file_stores_mtime(self, fts_index: CodeFTSIndex) -> None:
+        repo_id = fts_index.upsert_repo("repo", Path("/tmp/repo"))
+        fts_index.upsert_file(repo_id, "main.py", "python", 1024, "abc123", file_mtime=1000.5)
+
+        hashes = fts_index.get_all_file_hashes(repo_id)
+        assert "main.py" in hashes
+        assert hashes["main.py"] == ("abc123", 1000.5)
+
+    def test_upsert_file_mtime_defaults_to_none(self, fts_index: CodeFTSIndex) -> None:
+        repo_id = fts_index.upsert_repo("repo", Path("/tmp/repo"))
+        fts_index.upsert_file(repo_id, "main.py", "python", 1024, "abc123")
+
+        hashes = fts_index.get_all_file_hashes(repo_id)
+        assert hashes["main.py"] == ("abc123", None)
+
+    def test_get_all_file_hashes_returns_all_files(self, fts_index: CodeFTSIndex) -> None:
+        repo_id = fts_index.upsert_repo("repo", Path("/tmp/repo"))
+        fts_index.upsert_file(repo_id, "a.py", "python", 100, "h1", file_mtime=1.0)
+        fts_index.upsert_file(repo_id, "b.py", "python", 200, "h2", file_mtime=2.0)
+
+        hashes = fts_index.get_all_file_hashes(repo_id)
+        assert len(hashes) == 2
+        assert hashes["a.py"] == ("h1", 1.0)
+        assert hashes["b.py"] == ("h2", 2.0)
+
+    def test_get_all_file_hashes_empty_repo(self, fts_index: CodeFTSIndex) -> None:
+        repo_id = fts_index.upsert_repo("repo", Path("/tmp/repo"))
+        hashes = fts_index.get_all_file_hashes(repo_id)
+        assert hashes == {}
+
+    def test_get_all_file_hashes_ignores_other_repos(self, fts_index: CodeFTSIndex) -> None:
+        r1 = fts_index.upsert_repo("repo1", Path("/tmp/repo1"))
+        r2 = fts_index.upsert_repo("repo2", Path("/tmp/repo2"))
+        fts_index.upsert_file(r1, "a.py", "python", 100, "h1", file_mtime=1.0)
+        fts_index.upsert_file(r2, "b.py", "python", 200, "h2", file_mtime=2.0)
+
+        hashes = fts_index.get_all_file_hashes(r1)
+        assert len(hashes) == 1
+        assert "a.py" in hashes
+
+    def test_update_mtimes_batch(self, fts_index: CodeFTSIndex) -> None:
+        repo_id = fts_index.upsert_repo("repo", Path("/tmp/repo"))
+        fts_index.upsert_file(repo_id, "a.py", "python", 100, "h1", file_mtime=1.0)
+        fts_index.upsert_file(repo_id, "b.py", "python", 200, "h2", file_mtime=2.0)
+
+        fts_index.update_mtimes_batch(repo_id, [("a.py", 10.0), ("b.py", 20.0)])
+
+        hashes = fts_index.get_all_file_hashes(repo_id)
+        assert hashes["a.py"] == ("h1", 10.0)
+        assert hashes["b.py"] == ("h2", 20.0)
 
 
 class TestComputeFileHash:
