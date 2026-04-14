@@ -92,3 +92,19 @@ class TestIncrementalEmbedding:
 
         # create_table should NOT be called (we use open_table + delete + add instead)
         embedder._db.create_table.assert_not_called()
+
+
+class TestCompaction:
+    def test_compact_calls_optimize(self, embedder) -> None:
+        mock_table = MagicMock()
+        embedder._db.table_names.return_value = ["code_chunks"]
+        embedder._db.open_table.return_value = mock_table
+
+        embedder.compact()
+
+        mock_table.compact_files.assert_called_once()
+
+    def test_compact_noop_when_no_table(self, embedder) -> None:
+        embedder._db.table_names.return_value = []
+        # Should not raise
+        embedder.compact()

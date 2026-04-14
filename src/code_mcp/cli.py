@@ -16,6 +16,7 @@ def index_repos(
     limit: int | None = None,
     skip_vectors: bool = False,
     background_vectors: bool = False,
+    compact: bool = False,
 ) -> int:
     """Index source code repositories.
 
@@ -27,6 +28,7 @@ def index_repos(
         limit: Max files per repo (for testing)
         skip_vectors: Skip vector embedding (FTS-only, much faster)
         background_vectors: Run vector embedding in background thread
+        compact: Compact vector index after indexing (defragments LanceDB)
 
     Returns:
         Exit code (0 success, 1 error)
@@ -118,6 +120,12 @@ def index_repos(
     logger.info(f"  Total size:    {idx_stats['total_index_size_mb']:.1f} MB")
     logger.info("=" * 60)
 
+    if compact and not skip_vectors:
+        try:
+            manager.embedder.compact()
+        except Exception as e:
+            logger.warning(f"Vector compaction failed: {e}")
+
     manager.fts_index.close()
     return 0 if total_stats["failed"] == 0 else 1
 
@@ -170,6 +178,11 @@ Examples:
         action="store_true",
         help="Run vector embedding in background (FTS available immediately)",
     )
+    parser.add_argument(
+        "--compact",
+        action="store_true",
+        help="Compact vector index after indexing (defragments LanceDB)",
+    )
     parser.add_argument("-v", "--verbose", action="store_true")
     parser.add_argument("--limit", type=int, metavar="N", help="Max files per repo (for testing)")
 
@@ -183,5 +196,6 @@ Examples:
             limit=args.limit,
             skip_vectors=args.skip_vectors,
             background_vectors=args.background_vectors,
+            compact=args.compact,
         )
     )

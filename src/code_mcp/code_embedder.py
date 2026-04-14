@@ -293,6 +293,17 @@ class CodeEmbedder:
             for r in results
         ]
 
+    def compact(self) -> None:
+        """Compact LanceDB table to defragment after incremental updates."""
+        table_name = self.TABLE_NAME
+        if table_name not in self.db.table_names():
+            logger.info("No vector table to compact")
+            return
+        table = self.db.open_table(table_name)
+        logger.info("Compacting vector index...")
+        table.compact_files()
+        logger.info("Vector index compaction complete")
+
     def remove_file(self, file_id: int) -> None:
         """Remove all symbols for a file from vector index."""
         try:
