@@ -417,6 +417,9 @@ async def run_server():
         if watcher:
             watcher.stop()
             logger.info("Code file watcher stopped")
+        manager = _manager
+        if manager is not None:
+            manager.fts_index.close()
 
 
 if __name__ == "__main__":

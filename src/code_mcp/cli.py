@@ -118,6 +118,7 @@ def index_repos(
     logger.info(f"  Total size:    {idx_stats['total_index_size_mb']:.1f} MB")
     logger.info("=" * 60)
 
+    manager.fts_index.close()
     return 0 if total_stats["failed"] == 0 else 1
 
 
