@@ -39,7 +39,7 @@ class CodeFTSIndex:
         self.db_path = db_path or settings.index_db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn: sqlite3.Connection | None = None
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._init_db()
 
     @contextlib.contextmanager
