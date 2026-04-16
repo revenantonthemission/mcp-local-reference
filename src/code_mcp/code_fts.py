@@ -6,6 +6,8 @@ import contextlib
 import hashlib
 import logging
 import sqlite3
+import threading
+from collections.abc import Generator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -37,19 +39,23 @@ class CodeFTSIndex:
         self.db_path = db_path or settings.index_db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn: sqlite3.Connection | None = None
+        self._lock = threading.Lock()
         self._init_db()
 
-    def _connect(self) -> sqlite3.Connection:
-        if self._conn is None:
-            self._conn = sqlite3.connect(str(self.db_path))
-            self._conn.row_factory = sqlite3.Row
-        return self._conn
+    @contextlib.contextmanager
+    def _connect(self) -> Generator[sqlite3.Connection]:
+        with self._lock:
+            if self._conn is None:
+                self._conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
+                self._conn.row_factory = sqlite3.Row
+            yield self._conn
 
     def close(self) -> None:
         """Close the persistent connection."""
-        if self._conn is not None:
-            self._conn.close()
-            self._conn = None
+        with self._lock:
+            if self._conn is not None:
+                self._conn.close()
+                self._conn = None
 
     def _init_db(self) -> None:
         with self._connect() as conn:

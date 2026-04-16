@@ -13,7 +13,6 @@ from code_mcp.config import Settings
 from code_mcp.models import CodeSymbol
 from code_mcp.parser import TreeSitterParser
 
-
 # ------------------------------------------------------------------
 # Directories
 # ------------------------------------------------------------------
@@ -104,9 +103,7 @@ def sample_repo(tmp_dir: Path) -> Path:
     # Subdirectory with file
     sub = repo / "lib"
     sub.mkdir()
-    (sub / "utils.py").write_text(
-        "def helper():\n    return 42\n"
-    )
+    (sub / "utils.py").write_text("def helper():\n    return 42\n")
 
     # Excluded directory
     excluded = repo / "node_modules"

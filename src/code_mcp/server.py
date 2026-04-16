@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import sys
+import threading
 from typing import TYPE_CHECKING
 
 from mcp.server import Server
@@ -15,17 +16,20 @@ if TYPE_CHECKING:
 # MCP server instance
 server = Server("code-mcp")
 
-# Shared CodeIndexManager singleton (lazy-initialized)
+# Shared CodeIndexManager singleton (lazy-initialized, thread-safe)
 _manager: "CodeIndexManager | None" = None
+_manager_lock = threading.Lock()
 
 
 def get_manager() -> "CodeIndexManager":
     """Return the shared CodeIndexManager singleton, creating it if needed."""
     global _manager
     if _manager is None:
-        from .code_manager import CodeIndexManager
+        with _manager_lock:
+            if _manager is None:
+                from .code_manager import CodeIndexManager
 
-        _manager = CodeIndexManager()
+                _manager = CodeIndexManager()
     return _manager
 
 

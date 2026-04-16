@@ -71,5 +71,6 @@ uv run code-mcp-index --skip-vectors  # FTS only, ~10x faster
 - Services are stateless (connections created per-call for Zotero)
 - Tests use a mock SQLite DB in `conftest.py` — no real Zotero needed
 - code_mcp tests use `tests/code_mcp/conftest.py` with sample repo fixture
+- SQLite FK columns must have explicit indexes (SQLite doesn't auto-create them unlike PostgreSQL)
 
 <!-- Maintenance: Update when project structure, commands, or conventions change -->

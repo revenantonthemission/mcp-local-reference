@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 
 from .config import settings
 from .models import CodeSymbol
@@ -31,6 +32,7 @@ class CodeEmbedder:
         self._backend = backend
         self._model = None
         self._db = None
+        self._db_lock = threading.Lock()
         self._embedding_dim: int | None = None
 
     @property
@@ -99,7 +101,7 @@ class CodeEmbedder:
 
     @property
     def db(self):
-        """Lazy-load LanceDB connection."""
+        """Lazy-load LanceDB connection. Caller must hold self._db_lock."""
         if self._db is None:
             try:
                 import lancedb
@@ -162,12 +164,13 @@ class CodeEmbedder:
             )
 
         table_name = self.TABLE_NAME
-        if table_name in self.db.table_names():
-            table = self.db.open_table(table_name)
-            table.delete(f"file_id = {file_id}")
-            table.add(data)
-        else:
-            self.db.create_table(table_name, data)
+        with self._db_lock:
+            if table_name in self.db.table_names():
+                table = self.db.open_table(table_name)
+                table.delete(f"file_id = {file_id}")
+                table.add(data)
+            else:
+                self.db.create_table(table_name, data)
 
     MIN_EMBED_CHARS = 20  # skip trivial symbols (e.g., "pass", empty stubs)
 
@@ -238,15 +241,16 @@ class CodeEmbedder:
             logger.info(f"  Embedded {done}/{total} symbols ({done * 100 // total}%)")
 
         # Incremental write: only update changed files, preserve existing embeddings
-        if table_name in self.db.table_names():
-            table = self.db.open_table(table_name)
-            # Delete old embeddings for changed files
-            changed_file_ids = list({item[0] for item in all_items})
-            id_list = ", ".join(str(fid) for fid in changed_file_ids)
-            table.delete(f"file_id IN ({id_list})")
-            table.add(all_data)
-        else:
-            self.db.create_table(table_name, all_data)
+        with self._db_lock:
+            if table_name in self.db.table_names():
+                table = self.db.open_table(table_name)
+                # Delete old embeddings for changed files
+                changed_file_ids = list({item[0] for item in all_items})
+                id_list = ", ".join(str(fid) for fid in changed_file_ids)
+                table.delete(f"file_id IN ({id_list})")
+                table.add(all_data)
+            else:
+                self.db.create_table(table_name, all_data)
 
         logger.info(f"Batch embedding complete: {total} symbols stored")
         return total
@@ -261,22 +265,24 @@ class CodeEmbedder:
         if not self.is_available:
             return []
 
-        try:
-            table = self.db.open_table(self.TABLE_NAME)
-        except Exception:
-            return []
-
+        # Compute embedding outside lock (CPU-bound, no db access)
         query_embedding = self._embed_texts([query], is_query=True)[0]
 
-        search_builder = table.search(query_embedding).limit(limit)
-        if filter_expr:
-            search_builder = search_builder.where(filter_expr)
+        with self._db_lock:
+            try:
+                table = self.db.open_table(self.TABLE_NAME)
+            except Exception:
+                return []
 
-        try:
-            results = search_builder.to_list()
-        except Exception as e:
-            logger.warning(f"Code vector search failed: {e}")
-            return []
+            search_builder = table.search(query_embedding).limit(limit)
+            if filter_expr:
+                search_builder = search_builder.where(filter_expr)
+
+            try:
+                results = search_builder.to_list()
+            except Exception as e:
+                logger.warning(f"Code vector search failed: {e}")
+                return []
 
         return [
             {
@@ -295,22 +301,24 @@ class CodeEmbedder:
 
     def compact(self) -> None:
         """Compact LanceDB table to defragment after incremental updates."""
-        table_name = self.TABLE_NAME
-        if table_name not in self.db.table_names():
-            logger.info("No vector table to compact")
-            return
-        table = self.db.open_table(table_name)
-        logger.info("Compacting vector index...")
-        table.compact_files()
-        logger.info("Vector index compaction complete")
+        with self._db_lock:
+            table_name = self.TABLE_NAME
+            if table_name not in self.db.table_names():
+                logger.info("No vector table to compact")
+                return
+            table = self.db.open_table(table_name)
+            logger.info("Compacting vector index...")
+            table.compact_files()
+            logger.info("Vector index compaction complete")
 
     def remove_file(self, file_id: int) -> None:
         """Remove all symbols for a file from vector index."""
-        try:
-            table = self.db.open_table(self.TABLE_NAME)
-            table.delete(f"file_id = {file_id}")
-        except Exception:
-            pass
+        with self._db_lock:
+            try:
+                table = self.db.open_table(self.TABLE_NAME)
+                table.delete(f"file_id = {file_id}")
+            except Exception:
+                pass
 
     def get_stats(self) -> dict[str, int | float]:
         """Get vector index statistics."""

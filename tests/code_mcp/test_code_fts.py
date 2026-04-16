@@ -6,8 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from code_mcp.code_fts import CodeFTSIndex, CodeSearchResult
-from code_mcp.models import CodeSymbol
+from code_mcp.code_fts import CodeFTSIndex
 
 from .conftest import make_symbol
 
@@ -291,17 +290,19 @@ class TestGetSymbolByName:
 
 class TestPersistentConnection:
     def test_connect_returns_same_connection(self, fts_index: CodeFTSIndex) -> None:
-        conn1 = fts_index._connect()
-        conn2 = fts_index._connect()
+        with fts_index._connect() as conn1:
+            pass
+        with fts_index._connect() as conn2:
+            pass
         assert conn1 is conn2
 
     def test_close_closes_connection(self, fts_index: CodeFTSIndex) -> None:
         fts_index.close()
         # After close, a new connection should be created
-        conn = fts_index._connect()
-        # Should work fine — new connection created
-        row = conn.execute("SELECT 1").fetchone()
-        assert row[0] == 1
+        with fts_index._connect() as conn:
+            # Should work fine — new connection created
+            row = conn.execute("SELECT 1").fetchone()
+            assert row[0] == 1
 
 
 class TestMtimeAndBulkHash:

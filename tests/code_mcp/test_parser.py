@@ -6,18 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from code_mcp.parser import (
-    EXTENSION_TO_LANGUAGE,
-    DOC_EXTENSIONS,
-    TreeSitterParser,
-    supported_extensions,
-)
+from code_mcp.parser import TreeSitterParser, supported_extensions
 
-from .conftest import (
-    SAMPLE_PYTHON,
-    SAMPLE_JAVASCRIPT,
-    SAMPLE_MARKDOWN,
-)
+from .conftest import SAMPLE_JAVASCRIPT, SAMPLE_MARKDOWN, SAMPLE_PYTHON
 
 # tree-sitter-language-pack is optional; some tests require it
 _has_tree_sitter = TreeSitterParser().is_available
@@ -188,7 +179,9 @@ class TestParseEdgeCases:
         f.write_text("")
         assert parser.parse_file(f) == []
 
-    def test_whitespace_only_returns_no_symbols(self, parser: TreeSitterParser, tmp_dir: Path) -> None:
+    def test_whitespace_only_returns_no_symbols(
+        self, parser: TreeSitterParser, tmp_dir: Path
+    ) -> None:
         f = tmp_dir / "blank.py"
         f.write_text("   \n\n  \n")
         assert parser.parse_file(f) == []

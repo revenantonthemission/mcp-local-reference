@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from unittest.mock import MagicMock
 
 import pytest
@@ -36,6 +37,7 @@ def embedder():
     e._device = "cpu"
     e._backend = "torch"
     e._embedding_dim = 4
+    e._db_lock = threading.Lock()
 
     # Mock the model to return fixed-size vectors matching input length
     mock_model = MagicMock()
