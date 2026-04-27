@@ -40,9 +40,7 @@ def register_tools(mcp: FastMCP, config: Config) -> None:
     _register_remove_tags(mcp, api, zotero)
 
 
-def _register_suggest_tags_context(
-    mcp: FastMCP, zotero: ZoteroClient, pdf: PdfProcessor
-) -> None:
+def _register_suggest_tags_context(mcp: FastMCP, zotero: ZoteroClient, pdf: PdfProcessor) -> None:
     @mcp.tool()
     def suggest_tags_context(item_key: str) -> str:
         """Gather everything Claude needs to suggest tags for one Zotero item.
@@ -58,9 +56,7 @@ def _register_suggest_tags_context(
         return suggest_tags_context_impl(zotero, pdf, item_key)
 
 
-def _register_apply_tags(
-    mcp: FastMCP, api: ZoteroApiClient, zotero: ZoteroClient
-) -> None:
+def _register_apply_tags(mcp: FastMCP, api: ZoteroApiClient, zotero: ZoteroClient) -> None:
     @mcp.tool()
     def apply_tags(item_key: str, tags: list[str], dry_run: bool = True) -> str:
         """Add tags to a Zotero item via the Web API (append-only merge).
@@ -84,9 +80,7 @@ def _register_apply_tags(
         return apply_tags_impl(api, zotero, item_key, tags, dry_run)
 
 
-def _register_remove_tags(
-    mcp: FastMCP, api: ZoteroApiClient, zotero: ZoteroClient
-) -> None:
+def _register_remove_tags(mcp: FastMCP, api: ZoteroApiClient, zotero: ZoteroClient) -> None:
     @mcp.tool()
     def remove_tags(item_key: str, tags: list[str], dry_run: bool = True) -> str:
         """Remove tags from a Zotero item via the Web API.
