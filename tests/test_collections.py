@@ -1,0 +1,171 @@
+"""Tests for the collection-editing tools and their private helpers.
+
+Mirrors the structure of test_auto_tag.py: HTTP-layer tests live with
+their existing client class in test_auto_tag.py; this file holds tool-
+orchestration tests via a small _FakeApi / _FakeZotero pair.
+"""
+
+from __future__ import annotations
+
+import json  # noqa: F401 — used by future tool test classes
+from dataclasses import dataclass  # noqa: F401 — used by future tool test classes
+
+import pytest  # noqa: F401 — used by future tool test classes
+
+from mcp_local_reference.services.zotero_api_client import (
+    CollectionSnapshot,
+    ItemSnapshot,
+    MissingCredentialsError,  # noqa: F401 — used by future tool test classes
+    VersionConflictError,  # noqa: F401 — used by future tool test classes
+    ZoteroApiError,  # noqa: F401 — used by future tool test classes
+)
+from mcp_local_reference.services.zotero_client import Collection, Reference
+from mcp_local_reference.tools.collections import (
+    MAX_ITEMS_PER_CALL,  # noqa: F401 — used by future tool test classes
+    _check_cycle,
+    _local_collection_snapshot,  # noqa: F401 — used by future tool test classes
+)
+
+# ======================================================================
+# Fakes — collection-aware stand-ins for ZoteroApiClient and ZoteroClient
+# ======================================================================
+
+
+class _FakeApi:
+    """Stand-in for ZoteroApiClient covering all 7 methods used by the tools."""
+
+    def __init__(
+        self,
+        item_snapshots: dict[str, ItemSnapshot] | None = None,
+        collection_snapshots: dict[str, CollectionSnapshot] | None = None,
+        get_item_error: Exception | None = None,
+        get_collection_error: Exception | None = None,
+        update_item_error: Exception | None = None,
+        update_collection_error: Exception | None = None,
+        create_collection_error: Exception | None = None,
+        delete_collection_error: Exception | None = None,
+        new_version: int = 99,
+        created_snapshot: CollectionSnapshot | None = None,
+    ) -> None:
+        self.item_snapshots = item_snapshots or {}
+        self.collection_snapshots = collection_snapshots or {}
+        self.get_item_error = get_item_error
+        self.get_collection_error = get_collection_error
+        self.update_item_error = update_item_error
+        self.update_collection_error = update_collection_error
+        self.create_collection_error = create_collection_error
+        self.delete_collection_error = delete_collection_error
+        self.new_version = new_version
+        self.created_snapshot = created_snapshot
+        self.update_item_calls: list[tuple[str, list[str], int]] = []
+        self.update_collection_calls: list[tuple[str, dict, int]] = []
+        self.create_collection_calls: list[tuple[str, str | None]] = []
+        self.delete_collection_calls: list[tuple[str, int]] = []
+
+    def get_item(self, item_key: str) -> ItemSnapshot:
+        if self.get_item_error is not None:
+            raise self.get_item_error
+        return self.item_snapshots[item_key]
+
+    def get_collection(self, key: str) -> CollectionSnapshot:
+        if self.get_collection_error is not None:
+            raise self.get_collection_error
+        return self.collection_snapshots[key]
+
+    def update_item_collections(
+        self, item_key: str, collection_keys: list[str], version: int
+    ) -> int:
+        self.update_item_calls.append((item_key, list(collection_keys), version))
+        if self.update_item_error is not None:
+            raise self.update_item_error
+        return self.new_version
+
+    def update_collection(self, collection_key: str, *, version: int, **kwargs) -> int:
+        self.update_collection_calls.append((collection_key, dict(kwargs), version))
+        if self.update_collection_error is not None:
+            raise self.update_collection_error
+        return self.new_version
+
+    def create_collection(self, name: str, parent_key: str | None) -> CollectionSnapshot:
+        self.create_collection_calls.append((name, parent_key))
+        if self.create_collection_error is not None:
+            raise self.create_collection_error
+        assert self.created_snapshot is not None
+        return self.created_snapshot
+
+    def delete_collection(self, collection_key: str, version: int) -> None:
+        self.delete_collection_calls.append((collection_key, version))
+        if self.delete_collection_error is not None:
+            raise self.delete_collection_error
+
+
+class _FakeZotero:
+    """Stand-in for ZoteroClient — only the methods tools actually call."""
+
+    def __init__(
+        self,
+        references: dict[str, Reference] | None = None,
+        collections: list[Collection] | None = None,
+        item_collections: dict[str, list[str]] | None = None,
+        items_per_collection: dict[str, list[str]] | None = None,
+    ) -> None:
+        self.references = references or {}
+        self.collections = collections or []
+        self.item_collections = item_collections or {}
+        self.items_per_collection = items_per_collection or {}
+
+    def get_reference(self, item_key: str) -> Reference | None:
+        return self.references.get(item_key)
+
+    def list_collections(self) -> list[Collection]:
+        return self.collections
+
+    def get_item_collections(self, item_key: str) -> list[str]:
+        return list(self.item_collections.get(item_key, []))
+
+    def get_collection_items(self, collection_key: str, limit: int = 50):
+        keys = self.items_per_collection.get(collection_key, [])
+        return [self.references[k] for k in keys if k in self.references]
+
+
+def _coll(key: str, name: str, parent: str | None = None) -> Collection:
+    return Collection(key=key, name=name, parent_key=parent)
+
+
+def _ref(item_key: str, title: str = "", abstract: str = "") -> Reference:
+    return Reference(
+        item_key=item_key,
+        item_type="journalArticle",
+        title=title,
+        abstract=abstract,
+        tags=[],
+    )
+
+
+# ======================================================================
+# _check_cycle — local DAG walk used by reparent_collection
+# ======================================================================
+
+
+class TestCheckCycle:
+    def test_no_cycle_for_unrelated_collection(self) -> None:
+        # AI (no parent), Sinology (no parent). Reparent AI under Sinology — fine.
+        zotero = _FakeZotero(
+            collections=[_coll("AIK11111", "AI"), _coll("SINK2222", "Sinology")]
+        )
+        assert _check_cycle(zotero, target_key="AIK11111", new_parent_key="SINK2222") is False
+
+    def test_cycle_when_new_parent_is_target(self) -> None:
+        zotero = _FakeZotero(collections=[_coll("AIK11111", "AI")])
+        assert _check_cycle(zotero, target_key="AIK11111", new_parent_key="AIK11111") is True
+
+    def test_cycle_when_new_parent_is_descendant(self) -> None:
+        # AI -> LLMs -> Transformers; reparent AI under Transformers => cycle.
+        zotero = _FakeZotero(
+            collections=[
+                _coll("AIK11111", "AI"),
+                _coll("LLMK2222", "LLMs", "AIK11111"),
+                _coll("TRMK3333", "Transformers", "LLMK2222"),
+            ]
+        )
+        assert _check_cycle(zotero, target_key="AIK11111", new_parent_key="TRMK3333") is True
