@@ -643,3 +643,60 @@ class TestRemoveItemsFromCollection:
         )
         assert result["status"] == "no_changes"
         assert api.update_item_calls == []
+
+
+# ======================================================================
+# suggest_collection_placement_impl
+# ======================================================================
+
+
+from mcp_local_reference.tools.collections import (  # noqa: E402
+    suggest_collection_placement_impl,
+)
+
+
+class _NoOpPdf:
+    """Stand-in for PdfProcessor — placement suggester only needs first-page text."""
+
+    def first_page_text(self, path) -> str:  # pragma: no cover (stubbed)
+        return ""
+
+
+class TestSuggestCollectionPlacement:
+    def test_returns_title_abstract_tree_and_counts(self) -> None:
+        zotero = _FakeZotero(
+            collections=[_coll("AIK11111", "AI"), _coll("LLMK2222", "LLMs", "AIK11111")],
+            references={"ITEMA": _ref("ITEMA", title="Title A", abstract="Abstract about LLMs.")},
+            item_collections={"ITEMA": ["AIK11111"]},
+            items_per_collection={"AIK11111": ["ITEMA"], "LLMK2222": []},
+        )
+        result = json.loads(suggest_collection_placement_impl(zotero, _NoOpPdf(), "ITEMA"))
+        assert result["item"]["title"] == "Title A"
+        assert "LLMs" in result["item"]["abstract_or_snippet"]
+        assert result["item"]["current_collections"] == [{"key": "AIK11111", "name": "AI"}]
+        assert any(c["key"] == "AIK11111" for c in result["collection_tree"])
+        assert result["vocabulary"]["AIK11111"] == 1
+        assert result["vocabulary"]["LLMK2222"] == 0
+
+    def test_falls_back_to_pdf_snippet_when_abstract_empty(self) -> None:
+        class _Pdf:
+            def first_page_text(self, path) -> str:
+                return "First page snippet text."
+
+        zotero = _FakeZotero(
+            collections=[_coll("AIK11111", "AI")],
+            references={"ITEMA": _ref("ITEMA", title="T", abstract="")},
+            item_collections={"ITEMA": []},
+            items_per_collection={"AIK11111": []},
+        )
+        # The impl needs a PDF path lookup — stub get_pdf_path on the fake.
+        zotero.get_pdf_path = lambda k: "/tmp/fake.pdf"  # type: ignore[attr-defined]
+
+        result = json.loads(suggest_collection_placement_impl(zotero, _Pdf(), "ITEMA"))
+        assert "First page snippet text." in result["item"]["abstract_or_snippet"]
+
+    def test_returns_error_when_item_missing(self) -> None:
+        result = json.loads(
+            suggest_collection_placement_impl(_FakeZotero(), _NoOpPdf(), "NOPE9999")
+        )
+        assert "error" in result

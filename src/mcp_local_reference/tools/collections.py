@@ -42,7 +42,7 @@ def register_tools(mcp: FastMCP, config: Config) -> None:
     _register_delete_collection(mcp, api, zotero)
     _register_add_items_to_collection(mcp, api, zotero)
     _register_remove_items_from_collection(mcp, api, zotero)
-    _ = pdf  # placeholder until suggest_collection_placement is added in Task 15
+    _register_suggest_collection_placement(mcp, zotero, pdf)
 
 
 # ----------------------------------------------------------------------
@@ -623,3 +623,81 @@ def remove_items_from_collection_impl(
             "dry_run": False,
         }
     )
+
+
+# ----------------------------------------------------------------------
+# suggest_collection_placement
+# ----------------------------------------------------------------------
+
+
+def _register_suggest_collection_placement(
+    mcp: FastMCP, zotero: ZoteroClient, pdf: PdfProcessor
+) -> None:
+    @mcp.tool()
+    def suggest_collection_placement(item_key: str) -> str:
+        """Gather context for advising where an item should be filed.
+
+        Returns the item's title and abstract (or first-page PDF snippet
+        when the abstract is empty), the full collection tree, the
+        item's current memberships, and a per-collection item count so
+        well-populated folders can be preferred over thinly-used ones.
+        Read-only — no writes.
+        """
+        return suggest_collection_placement_impl(zotero, pdf, item_key)
+
+
+def suggest_collection_placement_impl(
+    zotero: ZoteroClient,
+    pdf: PdfProcessor,
+    item_key: str,
+) -> str:
+    ref = zotero.get_reference(item_key)
+    if ref is None:
+        return _err(f"Reference '{item_key}' not found")
+
+    abstract = (ref.abstract or "").strip()
+    if not abstract:
+        try:
+            pdf_path = zotero.get_pdf_path(item_key)
+        except Exception:  # noqa: BLE001 — local helper, never crash the tool
+            pdf_path = None
+        if pdf_path is not None:
+            try:
+                snippet = pdf.first_page_text(pdf_path)
+                if snippet:
+                    abstract = snippet[:2000]
+            except Exception:  # noqa: BLE001
+                pass
+
+    all_cols = _flatten_tree(zotero.list_collections())
+    by_key = {c.key: c for c in all_cols}
+    current_keys = zotero.get_item_collections(item_key)
+    current_collections = [{"key": k, "name": by_key[k].name} for k in current_keys if k in by_key]
+
+    vocabulary: dict[str, int] = {}
+    for c in all_cols:
+        # 10_000 is a high upper bound to avoid silent truncation; cap is local-side.
+        items = zotero.get_collection_items(c.key, limit=10_000)
+        vocabulary[c.key] = len(items)
+
+    return json.dumps(
+        {
+            "item": {
+                "item_key": item_key,
+                "title": ref.title,
+                "abstract_or_snippet": abstract,
+                "current_collections": current_collections,
+            },
+            "collection_tree": [_collection_to_dict(c) for c in zotero.list_collections()],
+            "vocabulary": vocabulary,
+        }
+    )
+
+
+def _collection_to_dict(col: Collection) -> dict[str, Any]:
+    return {
+        "key": col.key,
+        "name": col.name,
+        "parent_key": col.parent_key,
+        "children": [_collection_to_dict(c) for c in col.children],
+    }
