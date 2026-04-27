@@ -339,6 +339,66 @@ class TestRemoveTags:
         # set_tags called with current minus removed, sorted, and the original version
         assert api.set_tags_calls == [("K", ["a", "c"], 5)]
 
+    def test_remove_skips_write_when_no_tags_match(self) -> None:
+        api = _FakeApi(snapshot=ItemSnapshot(item_key="K", version=5, tags=["a", "b"], raw={}))
+        zotero = _FakeZotero()
+        result = json.loads(
+            remove_tags_impl(api, zotero, "K", ["x", "y"], dry_run=False)  # type: ignore[arg-type]
+        )
+        assert result["status"] == "no_changes"
+        assert result["would_remove"] == []
+        assert sorted(result["not_present"]) == ["x", "y"]
+        assert api.set_tags_calls == []  # no PATCH issued
+
+    def test_remove_idempotent_partial_match(self) -> None:
+        api = _FakeApi(
+            snapshot=ItemSnapshot(item_key="K", version=5, tags=["a", "b"], raw={}),
+            new_version=6,
+        )
+        zotero = _FakeZotero()
+        result = json.loads(
+            remove_tags_impl(api, zotero, "K", ["b", "absent"], dry_run=False)  # type: ignore[arg-type]
+        )
+        assert result["status"] == "applied"
+        assert result["would_remove"] == ["b"]
+        assert result["not_present"] == ["absent"]
+        assert result["after_apply"] == ["a"]
+        assert api.set_tags_calls == [("K", ["a"], 5)]
+
+    def test_remove_can_clear_all_tags(self) -> None:
+        api = _FakeApi(
+            snapshot=ItemSnapshot(item_key="K", version=5, tags=["a", "b"], raw={}),
+            new_version=6,
+        )
+        zotero = _FakeZotero()
+        result = json.loads(
+            remove_tags_impl(api, zotero, "K", ["a", "b"], dry_run=False)  # type: ignore[arg-type]
+        )
+        assert result["status"] == "applied"
+        assert result["after_apply"] == []
+        assert api.set_tags_calls == [("K", [], 5)]
+
+    def test_remove_with_missing_credentials_returns_error(self) -> None:
+        api = _FakeApi(get_error=MissingCredentialsError("set creds"))
+        zotero = _FakeZotero()
+        result = json.loads(
+            remove_tags_impl(api, zotero, "K", ["x"], dry_run=False)  # type: ignore[arg-type]
+        )
+        assert "error" in result
+        assert "creds" in result["error"]
+
+    def test_remove_version_conflict_returns_hint(self) -> None:
+        api = _FakeApi(
+            snapshot=ItemSnapshot(item_key="K", version=5, tags=["x"], raw={}),
+            set_error=VersionConflictError("conflict"),
+        )
+        zotero = _FakeZotero()
+        result = json.loads(
+            remove_tags_impl(api, zotero, "K", ["x"], dry_run=False)  # type: ignore[arg-type]
+        )
+        assert "error" in result
+        assert "hint" in result
+
 
 # ======================================================================
 # suggest_tags_context_impl — uses real ZoteroClient against the mock DB

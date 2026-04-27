@@ -307,8 +307,10 @@ def _build_remove_plan(
     if dry_run:
         plan["status"] = "preview"
         return json.dumps(plan, indent=2, ensure_ascii=False)
+    if not would_remove:
+        plan["status"] = "no_changes"
+        return json.dumps(plan, indent=2, ensure_ascii=False)
 
-    # Task 4 will add the no-changes short-circuit here.
     assert api is not None  # write path always passes a real api
     try:
         new_version = api.set_tags(item_key, after_apply, snapshot.version)
