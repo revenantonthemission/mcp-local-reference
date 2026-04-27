@@ -10,9 +10,9 @@ MCP server for accessing Zotero references, PDFs, and figures, plus a source cod
 
 - `src/mcp_local_reference/` — package root
   - `server.py` — FastMCP server creation
-  - `config.py` — env-var based configuration
-  - `tools/` — MCP tool definitions (references, pdf_reader, figures, local_pdf)
-  - `services/` — business logic (zotero_client, pdf_processor, vector_store)
+  - `config.py` — `pydantic_settings.BaseSettings` (auto-loads project-root `.env`)
+  - `tools/` — MCP tool definitions (references, pdf_reader, figures, local_pdf, auto_tag)
+  - `services/` — business logic (zotero_client, zotero_api_client, pdf_processor, vector_store)
 - `src/code_mcp/` — source code indexing & search MCP server
   - `server.py` — MCP server (search_code, list_repos, get_symbol tools)
   - `cli.py` — `code-mcp-index` CLI for indexing repos
@@ -49,7 +49,10 @@ uv run code-mcp-index --skip-vectors  # FTS only, ~10x faster
 
 ### mcp_local_reference
 - **Transport:** stdio (for Claude Desktop)
-- **Zotero access:** Read-only SQLite with `?mode=ro`
+- **Zotero read access:** Read-only SQLite with `?mode=ro` (queries always go through `services/zotero_client.py`)
+- **Zotero write access:** Web API via httpx (`services/zotero_api_client.py`) — writes go to `api.zotero.org` and propagate back via Zotero sync, so the local SQLite stays read-only end-to-end
+- **Auto-tagging (`tools/auto_tag.py`):** two MCP tools designed for human-in-the-loop tagging — `suggest_tags_context` (local read; returns title + abstract + current tags + top-30 vocabulary) and `apply_tags` (Web API write; append-only set union, `dry_run=True` by default with cap of 25 tags, optimistic concurrency via `If-Unmodified-Since-Version`). Dry-run reads from local SQLite (no creds needed); real writes require `ZOTERO_USER_ID` + `ZOTERO_API_KEY`
+- **Configuration:** `pydantic_settings.BaseSettings` with `env_file` resolved from `__file__` so `.env` loads regardless of cwd. `extra="ignore"` lets it coexist with `code_mcp.Settings` on a shared `.env`
 - **Vector search:** ChromaDB with default ONNX embeddings
 - **PDF processing:** PyMuPDF (fitz)
 - **Image processing:** Pillow
@@ -67,8 +70,9 @@ uv run code-mcp-index --skip-vectors  # FTS only, ~10x faster
 - Python 3.11+, type hints everywhere
 - Line length: 100 (enforced by ruff)
 - `from __future__ import annotations` in every module
-- Tools are registered via `register_tools(mcp, config)` functions
+- Tools are registered via `register_tools(mcp, config)` functions; tool implementations live in module-level `*_impl()` helpers outside the closure so they're directly unit-testable without an MCP harness
 - Services are stateless (connections created per-call for Zotero)
+- Credentials (`ZOTERO_API_KEY`, etc.) live in a project-root `.env` (gitignored) — never default a credential field to a non-empty literal in `config.py`
 - Tests use a mock SQLite DB in `conftest.py` — no real Zotero needed
 - code_mcp tests use `tests/code_mcp/conftest.py` with sample repo fixture
 - SQLite FK columns must have explicit indexes (SQLite doesn't auto-create them unlike PostgreSQL)
