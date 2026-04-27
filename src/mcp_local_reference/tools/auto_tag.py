@@ -128,7 +128,8 @@ def suggest_tags_context_impl(zotero: ZoteroClient, pdf: PdfProcessor, item_key:
         "guidance": (
             f"Suggest 3–7 tags. Prefer reusing names from `vocabulary`. "
             f"`apply_tags` rejects more than {MAX_TAGS_PER_CALL} tags per call "
-            f"and merges with `current_tags` (append-only — nothing is removed)."
+            f"and merges with `current_tags` (append-only — nothing is removed). "
+            f"Use `remove_tags` to undo tags that were added in error."
         ),
     }
     return json.dumps(payload, indent=2, ensure_ascii=False)
@@ -167,13 +168,21 @@ def _validate_tags_input(tags: list[str], action: str) -> tuple[list[str], str |
     return proposed, None
 
 
+class _SnapshotError(RuntimeError):
+    """Internal sentinel: snapshot resolution failed; carries the JSON error payload."""
+
+    def __init__(self, error_json: str) -> None:
+        super().__init__(error_json)
+        self.error_json = error_json
+
+
 def _resolve_snapshot(
     api: ZoteroApiClient,
     zotero: ZoteroClient,
     item_key: str,
     dry_run: bool,
-) -> tuple[ItemSnapshot, None] | tuple[None, str]:
-    """Return (snapshot, None) on success or (None, error_json) on failure.
+) -> ItemSnapshot:
+    """Return the snapshot, or raise ``_SnapshotError`` carrying the JSON error.
 
     Dry-run reads from local SQLite (no credentials needed). The write path
     fetches from the Web API to get the authoritative version number.
@@ -181,14 +190,14 @@ def _resolve_snapshot(
     if dry_run:
         snapshot = _local_snapshot(zotero, item_key)
         if snapshot is None:
-            return None, json.dumps({"error": f"Reference '{item_key}' not found"})
-        return snapshot, None
+            raise _SnapshotError(json.dumps({"error": f"Reference '{item_key}' not found"}))
+        return snapshot
     try:
-        return api.get_item(item_key), None
+        return api.get_item(item_key)
     except MissingCredentialsError as e:
-        return None, json.dumps({"error": str(e)})
+        raise _SnapshotError(json.dumps({"error": str(e)})) from e
     except ZoteroApiError as e:
-        return None, json.dumps({"error": str(e)})
+        raise _SnapshotError(json.dumps({"error": str(e)})) from e
 
 
 def apply_tags_impl(
@@ -202,9 +211,10 @@ def apply_tags_impl(
     if err is not None:
         return err
 
-    snapshot, err = _resolve_snapshot(api, zotero, item_key, dry_run)
-    if err is not None:
-        return err
+    try:
+        snapshot = _resolve_snapshot(api, zotero, item_key, dry_run)
+    except _SnapshotError as e:
+        return e.error_json
 
     return _build_and_maybe_write(api, snapshot, item_key, proposed, dry_run)
 
@@ -224,7 +234,7 @@ def _local_snapshot(zotero: ZoteroClient, item_key: str) -> ItemSnapshot | None:
 
 def _build_and_maybe_write(
     api: ZoteroApiClient,
-    snapshot: Any,
+    snapshot: ItemSnapshot,
     item_key: str,
     proposed: list[str],
     dry_run: bool,
@@ -275,15 +285,16 @@ def remove_tags_impl(
     if err is not None:
         return err
 
-    snapshot, err = _resolve_snapshot(api, zotero, item_key, dry_run)
-    if err is not None:
-        return err
+    try:
+        snapshot = _resolve_snapshot(api, zotero, item_key, dry_run)
+    except _SnapshotError as e:
+        return e.error_json
 
     return _build_remove_plan(snapshot, item_key, proposed, dry_run, api)
 
 
 def _build_remove_plan(
-    snapshot: Any,
+    snapshot: ItemSnapshot,
     item_key: str,
     proposed: list[str],
     dry_run: bool,

@@ -256,6 +256,7 @@ class TestApplyTags:
         )
         assert "error" in result
         assert "creds" in result["error"]
+        assert api.set_tags_calls == []  # never reach the write path
 
     def test_version_conflict_returns_hint(self) -> None:
         api = _FakeApi(
@@ -386,6 +387,7 @@ class TestRemoveTags:
         )
         assert "error" in result
         assert "creds" in result["error"]
+        assert api.set_tags_calls == []  # never reach the write path
 
     def test_remove_version_conflict_returns_hint(self) -> None:
         api = _FakeApi(
