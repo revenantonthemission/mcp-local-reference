@@ -24,6 +24,7 @@ from mcp_local_reference.tools.collections import (
     MAX_ITEMS_PER_CALL,  # noqa: F401 — used by future tool test classes
     _check_cycle,
     _local_collection_snapshot,  # noqa: F401 — used by future tool test classes
+    reparent_collection_impl,
 )
 
 # ======================================================================
@@ -319,3 +320,78 @@ class TestRenameCollection:
         result = json.loads(rename_collection_impl(api, zotero, "AIK11111", "X", dry_run=False))
         assert "error" in result
         assert "conflict" in result["error"]
+
+
+# ======================================================================
+# reparent_collection_impl
+# ======================================================================
+
+
+class TestReparentCollection:
+    def test_dry_run_reports_preview(self) -> None:
+        zotero = _FakeZotero(collections=[_coll("AIK11111", "AI"), _coll("OTRK2222", "Other")])
+        result = json.loads(
+            reparent_collection_impl(_FakeApi(), zotero, "AIK11111", "OTRK2222", dry_run=True)
+        )
+        assert result["status"] == "preview"
+        assert result["after"]["parent_key"] == "OTRK2222"
+
+    def test_dry_run_to_root(self) -> None:
+        zotero = _FakeZotero(
+            collections=[_coll("AIK11111", "AI", "OTRK2222"), _coll("OTRK2222", "Other")]
+        )
+        result = json.loads(
+            reparent_collection_impl(_FakeApi(), zotero, "AIK11111", None, dry_run=True)
+        )
+        assert result["status"] == "preview"
+        assert result["after"]["parent_key"] is None
+
+    def test_dry_run_no_op_when_parent_unchanged(self) -> None:
+        zotero = _FakeZotero(
+            collections=[_coll("AIK11111", "AI", "OTRK2222"), _coll("OTRK2222", "Other")]
+        )
+        result = json.loads(
+            reparent_collection_impl(_FakeApi(), zotero, "AIK11111", "OTRK2222", dry_run=True)
+        )
+        assert result["status"] == "no_changes"
+
+    def test_parent_missing_returns_error(self) -> None:
+        zotero = _FakeZotero(collections=[_coll("AIK11111", "AI")])
+        result = json.loads(
+            reparent_collection_impl(_FakeApi(), zotero, "AIK11111", "NOPE9999", dry_run=True)
+        )
+        assert "error" in result
+
+    def test_cycle_to_self_returns_error(self) -> None:
+        zotero = _FakeZotero(collections=[_coll("AIK11111", "AI")])
+        result = json.loads(
+            reparent_collection_impl(_FakeApi(), zotero, "AIK11111", "AIK11111", dry_run=True)
+        )
+        assert "error" in result
+        assert "Cycle" in result["error"]
+
+    def test_cycle_to_descendant_returns_error(self) -> None:
+        zotero = _FakeZotero(
+            collections=[
+                _coll("AIK11111", "AI"),
+                _coll("LLMK2222", "LLMs", "AIK11111"),
+            ]
+        )
+        result = json.loads(
+            reparent_collection_impl(_FakeApi(), zotero, "AIK11111", "LLMK2222", dry_run=True)
+        )
+        assert "error" in result
+        assert "Cycle" in result["error"]
+
+    def test_write_reparents(self) -> None:
+        zotero = _FakeZotero(collections=[_coll("AIK11111", "AI"), _coll("OTRK2222", "Other")])
+        api = _FakeApi(
+            collection_snapshots={"AIK11111": CollectionSnapshot("AIK11111", 7, "AI", None, {})},
+            new_version=8,
+        )
+        result = json.loads(
+            reparent_collection_impl(api, zotero, "AIK11111", "OTRK2222", dry_run=False)
+        )
+        assert result["status"] == "applied"
+        assert result["new_version"] == 8
+        assert api.update_collection_calls == [("AIK11111", {"parent_key": "OTRK2222"}, 7)]

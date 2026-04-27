@@ -37,6 +37,7 @@ def register_tools(mcp: FastMCP, config: Config) -> None:
     # The api/zotero/pdf instances above are passed into each `_register_*`.
     _register_create_collection(mcp, api, zotero)
     _register_rename_collection(mcp, api, zotero)
+    _register_reparent_collection(mcp, api, zotero)
     _ = pdf  # placeholder until suggest_collection_placement is added in Task 15
 
 
@@ -262,6 +263,90 @@ def rename_collection_impl(
             "collection_key": collection_key,
             "current": {"name": local.name, "parent_key": local.parent_key},
             "after": {"name": new_name, "parent_key": local.parent_key},
+            "new_version": new_version,
+            "status": "applied",
+            "dry_run": False,
+        }
+    )
+
+
+# ----------------------------------------------------------------------
+# reparent_collection
+# ----------------------------------------------------------------------
+
+
+def _register_reparent_collection(mcp: FastMCP, api: ZoteroApiClient, zotero: ZoteroClient) -> None:
+    @mcp.tool()
+    def reparent_collection(
+        collection_key: str,
+        new_parent_key: str | None,
+        dry_run: bool = True,
+    ) -> str:
+        """Move a collection under a different parent.
+
+        Pass new_parent_key=None to move to the library root.
+        Refuses cycles (re-parenting a collection under itself or one
+        of its descendants).
+        """
+        return reparent_collection_impl(api, zotero, collection_key, new_parent_key, dry_run)
+
+
+def reparent_collection_impl(
+    api: ZoteroApiClient,
+    zotero: ZoteroClient,
+    collection_key: str,
+    new_parent_key: str | None,
+    dry_run: bool,
+) -> str:
+    local = _local_collection_snapshot(zotero, collection_key)
+    if local is None:
+        return _err(f"Reference '{collection_key}' not found")
+
+    if new_parent_key is not None:
+        all_keys = {c.key for c in _flatten_tree(zotero.list_collections())}
+        if new_parent_key not in all_keys:
+            return _err(f"Parent collection '{new_parent_key}' not found")
+        if _check_cycle(zotero, collection_key, new_parent_key):
+            return _err(
+                f"Cycle detected: collection {collection_key} cannot be re-parented "
+                f"under its own descendant {new_parent_key}"
+            )
+
+    if local.parent_key == new_parent_key:
+        return json.dumps(
+            {
+                "collection_key": collection_key,
+                "current": {"name": local.name, "parent_key": local.parent_key},
+                "status": "no_changes",
+                "dry_run": dry_run,
+            }
+        )
+
+    if dry_run:
+        return json.dumps(
+            {
+                "collection_key": collection_key,
+                "current": {"name": local.name, "parent_key": local.parent_key},
+                "would_reparent_to": new_parent_key,
+                "after": {"name": local.name, "parent_key": new_parent_key},
+                "status": "preview",
+                "dry_run": True,
+            }
+        )
+
+    try:
+        snap = api.get_collection(collection_key)
+        new_version = api.update_collection(
+            collection_key, parent_key=new_parent_key, version=snap.version
+        )
+    except (MissingCredentialsError, VersionConflictError, ZoteroApiError) as exc:
+        return _err(str(exc))
+
+    return json.dumps(
+        {
+            "collection_key": collection_key,
+            "current": {"name": local.name, "parent_key": local.parent_key},
+            "after": {"name": local.name, "parent_key": new_parent_key},
             "new_version": new_version,
             "status": "applied",
             "dry_run": False,
