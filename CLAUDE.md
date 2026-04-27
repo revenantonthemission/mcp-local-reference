@@ -76,5 +76,6 @@ uv run code-mcp-index --skip-vectors  # FTS only, ~10x faster
 - Tests use a mock SQLite DB in `conftest.py` — no real Zotero needed
 - code_mcp tests use `tests/code_mcp/conftest.py` with sample repo fixture
 - SQLite FK columns must have explicit indexes (SQLite doesn't auto-create them unlike PostgreSQL)
+- Non-trivial feature work flows through `superpowers:brainstorming` → `superpowers:writing-plans` → `superpowers:subagent-driven-development` on a `feat/*` branch, fast-forward merged back to `main`. Specs live in `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md`, plans in `docs/superpowers/plans/YYYY-MM-DD-<topic>.md`.
 
 <!-- Maintenance: Update when project structure, commands, or conventions change -->
