@@ -241,6 +241,55 @@ class TestZoteroApiClient:
         assert snap.name == "Sinology"
         assert snap.parent_key is None
 
+    def test_update_collection_rename_only(self, api_config: Config) -> None:
+        captured: dict[str, object] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured["method"] = request.method
+            captured["unmod"] = request.headers.get("If-Unmodified-Since-Version")
+            captured["body"] = json.loads(request.content)
+            return httpx.Response(204, headers={"Last-Modified-Version": "11"})
+
+        client = ZoteroApiClient(api_config, transport=httpx.MockTransport(handler))
+        new_version = client.update_collection(
+            "COLL1234", name="Artificial Intelligence", version=10
+        )
+
+        assert new_version == 11
+        assert captured["method"] == "PATCH"
+        assert captured["unmod"] == "10"
+        assert captured["body"] == {"name": "Artificial Intelligence"}
+
+    def test_update_collection_reparent_to_root(self, api_config: Config) -> None:
+        captured: dict[str, object] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured["body"] = json.loads(request.content)
+            return httpx.Response(204, headers={"Last-Modified-Version": "12"})
+
+        client = ZoteroApiClient(api_config, transport=httpx.MockTransport(handler))
+        client.update_collection("COLL1234", parent_key=None, version=11)
+
+        assert captured["body"] == {"parentCollection": False}
+
+    def test_update_collection_reparent_to_other(self, api_config: Config) -> None:
+        captured: dict[str, object] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured["body"] = json.loads(request.content)
+            return httpx.Response(204, headers={"Last-Modified-Version": "13"})
+
+        client = ZoteroApiClient(api_config, transport=httpx.MockTransport(handler))
+        client.update_collection("COLL1234", parent_key="NEWPARNT", version=12)
+
+        assert captured["body"] == {"parentCollection": "NEWPARNT"}
+
+    def test_update_collection_412_raises_conflict(self, api_config: Config) -> None:
+        transport = httpx.MockTransport(lambda r: httpx.Response(412))
+        client = ZoteroApiClient(api_config, transport=transport)
+        with pytest.raises(VersionConflictError):
+            client.update_collection("COLL1234", name="X", version=10)
+
 
 # ======================================================================
 # apply_tags_impl — orchestration via a fake API

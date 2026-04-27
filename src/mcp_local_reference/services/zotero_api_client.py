@@ -163,6 +163,46 @@ class ZoteroApiClient:
             ) from exc
         return self._collection_snapshot_from_data(entry["data"])
 
+    def update_collection(
+        self,
+        collection_key: str,
+        *,
+        name: str | None = None,
+        parent_key: str | None | _Sentinel = _UNSET,
+        version: int,
+    ) -> int:
+        """PATCH a collection's name and/or parent.
+
+        ``parent_key`` semantics:
+          - ``_UNSET`` (default) — don't touch parent; rename only.
+          - explicit ``None`` — move to library root (Zotero: parentCollection=false).
+          - explicit ``str`` — move under that collection.
+
+        Uses ``If-Unmodified-Since-Version`` for optimistic concurrency.
+        """
+        self._require_credentials()
+        body: dict[str, Any] = {}
+        if name is not None:
+            body["name"] = name
+        if not isinstance(parent_key, _Sentinel):
+            body["parentCollection"] = parent_key if parent_key is not None else False
+        if not body:
+            return version  # no-op
+        url = self._collection_url(collection_key)
+        headers = {**self._headers(), "If-Unmodified-Since-Version": str(version)}
+        with self._client(headers) as client:
+            response = client.patch(url, json=body)
+        if response.status_code == 412:
+            raise VersionConflictError(
+                f"Collection '{collection_key}' was modified since version {version}; "
+                "refetch and retry"
+            )
+        if response.status_code == 404:
+            raise ZoteroApiError(f"Collection '{collection_key}' not found")
+        response.raise_for_status()
+        new_version = response.headers.get("Last-Modified-Version")
+        return int(new_version) if new_version else version + 1
+
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
