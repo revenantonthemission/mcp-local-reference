@@ -121,6 +121,49 @@ class ZoteroApiClient:
         return int(new_version) if new_version else version + 1
 
     # ------------------------------------------------------------------
+    # Collection-object operations
+    # ------------------------------------------------------------------
+
+    def get_collection(self, collection_key: str) -> CollectionSnapshot:
+        """Fetch a single collection; needed before any write to capture its version."""
+        self._require_credentials()
+        url = self._collection_url(collection_key)
+        with self._client(self._headers()) as client:
+            response = client.get(url)
+        if response.status_code == 404:
+            raise ZoteroApiError(
+                f"Collection '{collection_key}' not found in Zotero Web API"
+            )
+        response.raise_for_status()
+        body = response.json()
+        data = body.get("data", body)
+        return self._collection_snapshot_from_data(data)
+
+    def create_collection(
+        self, name: str, parent_key: str | None
+    ) -> CollectionSnapshot:
+        """POST a new collection; returns a snapshot of the created collection."""
+        self._require_credentials()
+        url = self._collections_url()
+        payload: dict[str, Any] = {"name": name}
+        payload["parentCollection"] = parent_key if parent_key is not None else False
+        with self._client(self._headers()) as client:
+            response = client.post(url, json=[payload])
+        response.raise_for_status()
+        body = response.json()
+        if body.get("failed"):
+            raise ZoteroApiError(
+                f"Zotero rejected create_collection: {body['failed']}"
+            )
+        try:
+            entry = body["successful"]["0"]
+        except (KeyError, TypeError) as exc:
+            raise ZoteroApiError(
+                f"Unexpected create_collection response: {body!r}"
+            ) from exc
+        return self._collection_snapshot_from_data(entry["data"])
+
+    # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
 
@@ -135,6 +178,25 @@ class ZoteroApiClient:
     def _item_url(self, item_key: str) -> str:
         base = self.config.zotero_api_base_url.rstrip("/")
         return f"{base}/users/{self.config.zotero_user_id}/items/{item_key}"
+
+    def _collections_url(self) -> str:
+        base = self.config.zotero_api_base_url.rstrip("/")
+        return f"{base}/users/{self.config.zotero_user_id}/collections"
+
+    def _collection_url(self, collection_key: str) -> str:
+        return f"{self._collections_url()}/{collection_key}"
+
+    @staticmethod
+    def _collection_snapshot_from_data(data: dict[str, Any]) -> CollectionSnapshot:
+        parent_raw = data.get("parentCollection")
+        parent_key = parent_raw if isinstance(parent_raw, str) else None
+        return CollectionSnapshot(
+            collection_key=data["key"],
+            version=int(data.get("version", 0)),
+            name=data.get("name", ""),
+            parent_key=parent_key,
+            raw=data,
+        )
 
     def _headers(self) -> dict[str, str]:
         return {

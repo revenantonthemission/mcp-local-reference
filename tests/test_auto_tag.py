@@ -145,6 +145,102 @@ class TestZoteroApiClient:
         assert snap.parent_key is None
         assert snap.raw == {"key": "COLL1234"}
 
+    def test_create_collection_posts_and_returns_snapshot(
+        self, api_config: Config
+    ) -> None:
+        captured: dict[str, object] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured["method"] = request.method
+            captured["url"] = str(request.url)
+            captured["body"] = json.loads(request.content)
+            return httpx.Response(
+                200,
+                json={
+                    "successful": {
+                        "0": {
+                            "key": "NEWKEYAA",
+                            "version": 5,
+                            "data": {
+                                "key": "NEWKEYAA",
+                                "version": 5,
+                                "name": "AI",
+                                "parentCollection": "PARENTKK",
+                            },
+                        }
+                    },
+                    "success": {"0": "NEWKEYAA"},
+                    "failed": {},
+                    "unchanged": {},
+                },
+            )
+
+        client = ZoteroApiClient(api_config, transport=httpx.MockTransport(handler))
+        snap = client.create_collection("AI", parent_key="PARENTKK")
+
+        assert snap.collection_key == "NEWKEYAA"
+        assert snap.version == 5
+        assert snap.name == "AI"
+        assert snap.parent_key == "PARENTKK"
+        assert captured["method"] == "POST"
+        assert "users/42/collections" in str(captured["url"])
+        assert captured["body"] == [{"name": "AI", "parentCollection": "PARENTKK"}]
+
+    def test_create_collection_at_root_sends_false_parent(
+        self, api_config: Config
+    ) -> None:
+        captured: dict[str, object] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured["body"] = json.loads(request.content)
+            return httpx.Response(
+                200,
+                json={
+                    "successful": {
+                        "0": {
+                            "key": "ROOTKEYY",
+                            "version": 1,
+                            "data": {
+                                "key": "ROOTKEYY",
+                                "version": 1,
+                                "name": "TopLevel",
+                                "parentCollection": False,
+                            },
+                        }
+                    },
+                    "success": {"0": "ROOTKEYY"},
+                    "failed": {},
+                    "unchanged": {},
+                },
+            )
+
+        client = ZoteroApiClient(api_config, transport=httpx.MockTransport(handler))
+        snap = client.create_collection("TopLevel", parent_key=None)
+
+        assert snap.parent_key is None
+        assert captured["body"] == [{"name": "TopLevel", "parentCollection": False}]
+
+    def test_get_collection_returns_snapshot(self, api_config: Config) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "key": "COLL1234",
+                        "version": 9,
+                        "name": "Sinology",
+                        "parentCollection": False,
+                    }
+                },
+            )
+
+        client = ZoteroApiClient(api_config, transport=httpx.MockTransport(handler))
+        snap = client.get_collection("COLL1234")
+        assert snap.collection_key == "COLL1234"
+        assert snap.version == 9
+        assert snap.name == "Sinology"
+        assert snap.parent_key is None
+
 
 # ======================================================================
 # apply_tags_impl — orchestration via a fake API
