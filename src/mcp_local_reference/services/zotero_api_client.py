@@ -39,6 +39,24 @@ class ItemSnapshot:
     raw: dict[str, Any]
 
 
+@dataclass
+class CollectionSnapshot:
+    """Minimal view of a Zotero collection — what we need for lifecycle edits."""
+
+    collection_key: str
+    version: int
+    name: str
+    parent_key: str | None  # None at root
+    raw: dict[str, Any]
+
+
+class _Sentinel:
+    """Marker type for arguments that distinguish 'unset' from 'set to None'."""
+
+
+_UNSET: _Sentinel = _Sentinel()
+
+
 class ZoteroApiClient:
     """Thin httpx-based wrapper for the Zotero Web API."""
 

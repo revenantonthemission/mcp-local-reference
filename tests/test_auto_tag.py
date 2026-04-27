@@ -129,6 +129,22 @@ class TestZoteroApiClient:
         with pytest.raises(MissingCredentialsError):
             ZoteroApiClient(config).get_item("ABCD1234")
 
+    def test_collection_snapshot_dataclass_shape(self) -> None:
+        from mcp_local_reference.services.zotero_api_client import CollectionSnapshot
+
+        snap = CollectionSnapshot(
+            collection_key="COLL1234",
+            version=42,
+            name="AI",
+            parent_key=None,
+            raw={"key": "COLL1234"},
+        )
+        assert snap.collection_key == "COLL1234"
+        assert snap.version == 42
+        assert snap.name == "AI"
+        assert snap.parent_key is None
+        assert snap.raw == {"key": "COLL1234"}
+
 
 # ======================================================================
 # apply_tags_impl — orchestration via a fake API
