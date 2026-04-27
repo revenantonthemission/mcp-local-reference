@@ -457,3 +457,116 @@ class TestDeleteCollection:
         result = json.loads(delete_collection_impl(api, zotero, "AIK11111", dry_run=False))
         assert "error" in result
         assert "conflict" in result["error"]
+
+
+# ======================================================================
+# add_items_to_collection_impl
+# ======================================================================
+
+
+from mcp_local_reference.tools.collections import (  # noqa: E402
+    add_items_to_collection_impl,
+)
+
+
+class TestAddItemsToCollection:
+    def test_rejects_empty_list(self) -> None:
+        result = json.loads(
+            add_items_to_collection_impl(_FakeApi(), _FakeZotero(), "AIK11111", [], dry_run=True)
+        )
+        assert "error" in result
+
+    def test_rejects_too_many_items(self) -> None:
+        too_many = [f"K{i:07d}" for i in range(MAX_ITEMS_PER_CALL + 1)]
+        result = json.loads(
+            add_items_to_collection_impl(
+                _FakeApi(), _FakeZotero(), "AIK11111", too_many, dry_run=True
+            )
+        )
+        assert "error" in result
+        assert "exceeds" in result["error"]
+
+    def test_dry_run_partitions_correctly(self) -> None:
+        zotero = _FakeZotero(
+            collections=[_coll("AIK11111", "AI")],
+            references={"ITEMA": _ref("ITEMA"), "ITEMB": _ref("ITEMB")},
+            item_collections={"ITEMA": [], "ITEMB": ["AIK11111"]},
+        )
+        result = json.loads(
+            add_items_to_collection_impl(
+                _FakeApi(), zotero, "AIK11111", ["ITEMA", "ITEMB", "MISSING0"], dry_run=True
+            )
+        )
+        assert result["status"] == "preview"
+        assert result["would_add"] == ["ITEMA"]
+        assert result["already_present"] == ["ITEMB"]
+        assert result["not_found"] == ["MISSING0"]
+
+    def test_collection_missing_returns_error(self) -> None:
+        result = json.loads(
+            add_items_to_collection_impl(
+                _FakeApi(), _FakeZotero(), "NOPE9999", ["ITEMA"], dry_run=True
+            )
+        )
+        assert "error" in result
+
+    def test_write_succeeds_clean(self) -> None:
+        zotero = _FakeZotero(
+            collections=[_coll("AIK11111", "AI")],
+            references={"ITEMA": _ref("ITEMA")},
+            item_collections={"ITEMA": []},
+        )
+        api = _FakeApi(
+            item_snapshots={
+                "ITEMA": ItemSnapshot(item_key="ITEMA", version=10, tags=[], collections=[], raw={})
+            },
+            new_version=11,
+        )
+        result = json.loads(
+            add_items_to_collection_impl(api, zotero, "AIK11111", ["ITEMA"], dry_run=False)
+        )
+        assert result["status"] == "applied"
+        assert result["succeeded"] == [{"item_key": "ITEMA", "new_version": 11}]
+        assert result["failed"] == []
+        assert api.update_item_calls == [("ITEMA", ["AIK11111"], 10)]
+
+    def test_write_records_partial_failure(self) -> None:
+        zotero = _FakeZotero(
+            collections=[_coll("AIK11111", "AI")],
+            references={"ITEMA": _ref("ITEMA"), "ITEMB": _ref("ITEMB")},
+            item_collections={"ITEMA": [], "ITEMB": []},
+        )
+        # First item ok; second raises VersionConflict.
+        snapshots = {
+            "ITEMA": ItemSnapshot("ITEMA", 10, [], [], {}),
+            "ITEMB": ItemSnapshot("ITEMB", 20, [], [], {}),
+        }
+
+        class _PartialApi(_FakeApi):
+            def update_item_collections(self, item_key, collection_keys, version):
+                self.update_item_calls.append((item_key, list(collection_keys), version))
+                if item_key == "ITEMB":
+                    raise VersionConflictError("conflict on ITEMB")
+                return self.new_version
+
+        api = _PartialApi(item_snapshots=snapshots, new_version=11)
+        result = json.loads(
+            add_items_to_collection_impl(api, zotero, "AIK11111", ["ITEMA", "ITEMB"], dry_run=False)
+        )
+        assert result["status"] == "partial"
+        assert result["succeeded"] == [{"item_key": "ITEMA", "new_version": 11}]
+        assert len(result["failed"]) == 1
+        assert result["failed"][0]["item_key"] == "ITEMB"
+
+    def test_write_short_circuits_when_all_already_present(self) -> None:
+        zotero = _FakeZotero(
+            collections=[_coll("AIK11111", "AI")],
+            references={"ITEMA": _ref("ITEMA")},
+            item_collections={"ITEMA": ["AIK11111"]},
+        )
+        api = _FakeApi()
+        result = json.loads(
+            add_items_to_collection_impl(api, zotero, "AIK11111", ["ITEMA"], dry_run=False)
+        )
+        assert result["status"] == "no_changes"
+        assert api.update_item_calls == []

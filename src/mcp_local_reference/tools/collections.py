@@ -9,6 +9,7 @@ context for Claude to advise on placement without writing.
 from __future__ import annotations
 
 import json
+from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
@@ -17,10 +18,10 @@ from mcp_local_reference.services.pdf_processor import PdfProcessor
 from mcp_local_reference.services.zotero_api_client import (
     CollectionSnapshot,
     ItemSnapshot,  # noqa: F401 — used by future tool implementations
-    MissingCredentialsError,  # noqa: F401 — used by future tool implementations
-    VersionConflictError,  # noqa: F401 — used by future tool implementations
+    MissingCredentialsError,
+    VersionConflictError,
     ZoteroApiClient,
-    ZoteroApiError,  # noqa: F401 — used by future tool implementations
+    ZoteroApiError,
 )
 from mcp_local_reference.services.zotero_client import Collection, ZoteroClient
 
@@ -39,6 +40,7 @@ def register_tools(mcp: FastMCP, config: Config) -> None:
     _register_rename_collection(mcp, api, zotero)
     _register_reparent_collection(mcp, api, zotero)
     _register_delete_collection(mcp, api, zotero)
+    _register_add_items_to_collection(mcp, api, zotero)
     _ = pdf  # placeholder until suggest_collection_placement is added in Task 15
 
 
@@ -408,6 +410,113 @@ def delete_collection_impl(
             "would_orphan_items": items_inside,
             "would_orphan_collections": descendants,
             "status": "applied",
+            "dry_run": False,
+        }
+    )
+
+
+# ----------------------------------------------------------------------
+# add_items_to_collection
+# ----------------------------------------------------------------------
+
+
+def _register_add_items_to_collection(
+    mcp: FastMCP, api: ZoteroApiClient, zotero: ZoteroClient
+) -> None:
+    @mcp.tool()
+    def add_items_to_collection(
+        collection_key: str,
+        item_keys: list[str],
+        dry_run: bool = True,
+    ) -> str:
+        """Add items to a Zotero collection (set-union per item).
+
+        Defaults to dry_run=True. Per-call cap of 25 items. Each item
+        is patched independently — partial failures are reported in the
+        `failed` list while successful items are committed.
+        """
+        return add_items_to_collection_impl(api, zotero, collection_key, item_keys, dry_run)
+
+
+def add_items_to_collection_impl(
+    api: ZoteroApiClient,
+    zotero: ZoteroClient,
+    collection_key: str,
+    item_keys: list[str],
+    dry_run: bool,
+) -> str:
+    cleaned = [k.strip() for k in item_keys if k and k.strip()]
+    if not cleaned:
+        return _err("No item keys provided")
+    if len(cleaned) > MAX_ITEMS_PER_CALL:
+        return _err(
+            f"Refusing: {len(cleaned)} items exceeds the per-call cap of "
+            f"{MAX_ITEMS_PER_CALL}. Split into smaller batches."
+        )
+
+    coll_snap = _local_collection_snapshot(zotero, collection_key)
+    if coll_snap is None:
+        return _err(f"Reference '{collection_key}' not found")
+
+    would_add: list[str] = []
+    already_present: list[str] = []
+    not_found: list[str] = []
+    for k in cleaned:
+        if zotero.get_reference(k) is None:
+            not_found.append(k)
+            continue
+        current = zotero.get_item_collections(k)
+        if collection_key in current:
+            already_present.append(k)
+        else:
+            would_add.append(k)
+
+    if dry_run:
+        return json.dumps(
+            {
+                "collection_key": collection_key,
+                "would_add": would_add,
+                "already_present": already_present,
+                "not_found": not_found,
+                "status": "preview",
+                "dry_run": True,
+            }
+        )
+
+    if not would_add:
+        return json.dumps(
+            {
+                "collection_key": collection_key,
+                "succeeded": [],
+                "failed": [],
+                "already_present": already_present,
+                "not_found": not_found,
+                "status": "no_changes",
+                "dry_run": False,
+            }
+        )
+
+    succeeded: list[dict[str, Any]] = []
+    failed: list[dict[str, Any]] = []
+    for item_key in would_add:
+        try:
+            snap = api.get_item(item_key)
+            new_colls = sorted({*snap.collections, collection_key})
+            new_version = api.update_item_collections(item_key, new_colls, snap.version)
+            succeeded.append({"item_key": item_key, "new_version": new_version})
+        except MissingCredentialsError as exc:
+            return _err(str(exc))
+        except (VersionConflictError, ZoteroApiError) as exc:
+            failed.append({"item_key": item_key, "reason": str(exc)})
+
+    return json.dumps(
+        {
+            "collection_key": collection_key,
+            "succeeded": succeeded,
+            "failed": failed,
+            "already_present": already_present,
+            "not_found": not_found,
+            "status": "partial" if failed else "applied",
             "dry_run": False,
         }
     )
