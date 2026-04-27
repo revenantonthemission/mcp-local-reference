@@ -324,6 +324,21 @@ class TestRemoveTags:
         assert "error" in result
         assert "MISSING" in result["error"]
 
+    def test_remove_writes_diff(self) -> None:
+        api = _FakeApi(
+            snapshot=ItemSnapshot(item_key="K", version=5, tags=["a", "b", "c"], raw={}),
+            new_version=6,
+        )
+        zotero = _FakeZotero()  # not used when dry_run=False
+        result = json.loads(
+            remove_tags_impl(api, zotero, "K", ["b"], dry_run=False)  # type: ignore[arg-type]
+        )
+        assert result["status"] == "applied"
+        assert result["new_version"] == 6
+        assert result["removed_count"] == 1
+        # set_tags called with current minus removed, sorted, and the original version
+        assert api.set_tags_calls == [("K", ["a", "c"], 5)]
+
 
 # ======================================================================
 # suggest_tags_context_impl — uses real ZoteroClient against the mock DB

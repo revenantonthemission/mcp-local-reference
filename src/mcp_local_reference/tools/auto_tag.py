@@ -167,6 +167,30 @@ def _validate_tags_input(tags: list[str], action: str) -> tuple[list[str], str |
     return proposed, None
 
 
+def _resolve_snapshot(
+    api: ZoteroApiClient,
+    zotero: ZoteroClient,
+    item_key: str,
+    dry_run: bool,
+) -> tuple[ItemSnapshot, None] | tuple[None, str]:
+    """Return (snapshot, None) on success or (None, error_json) on failure.
+
+    Dry-run reads from local SQLite (no credentials needed). The write path
+    fetches from the Web API to get the authoritative version number.
+    """
+    if dry_run:
+        snapshot = _local_snapshot(zotero, item_key)
+        if snapshot is None:
+            return None, json.dumps({"error": f"Reference '{item_key}' not found"})
+        return snapshot, None
+    try:
+        return api.get_item(item_key), None
+    except MissingCredentialsError as e:
+        return None, json.dumps({"error": str(e)})
+    except ZoteroApiError as e:
+        return None, json.dumps({"error": str(e)})
+
+
 def apply_tags_impl(
     api: ZoteroApiClient,
     zotero: ZoteroClient,
@@ -178,17 +202,9 @@ def apply_tags_impl(
     if err is not None:
         return err
 
-    if dry_run:
-        snapshot = _local_snapshot(zotero, item_key)
-        if snapshot is None:
-            return json.dumps({"error": f"Reference '{item_key}' not found"})
-    else:
-        try:
-            snapshot = api.get_item(item_key)
-        except MissingCredentialsError as e:
-            return json.dumps({"error": str(e)})
-        except ZoteroApiError as e:
-            return json.dumps({"error": str(e)})
+    snapshot, err = _resolve_snapshot(api, zotero, item_key, dry_run)
+    if err is not None:
+        return err
 
     return _build_and_maybe_write(api, snapshot, item_key, proposed, dry_run)
 
@@ -259,15 +275,11 @@ def remove_tags_impl(
     if err is not None:
         return err
 
-    if dry_run:
-        snapshot = _local_snapshot(zotero, item_key)
-        if snapshot is None:
-            return json.dumps({"error": f"Reference '{item_key}' not found"})
-    else:
-        # TODO(Task 3): write path
-        return json.dumps({"error": "remove_tags write path not implemented yet"})
+    snapshot, err = _resolve_snapshot(api, zotero, item_key, dry_run)
+    if err is not None:
+        return err
 
-    return _build_remove_plan(snapshot, item_key, proposed, dry_run, api=None)
+    return _build_remove_plan(snapshot, item_key, proposed, dry_run, api)
 
 
 def _build_remove_plan(
@@ -295,5 +307,17 @@ def _build_remove_plan(
     if dry_run:
         plan["status"] = "preview"
         return json.dumps(plan, indent=2, ensure_ascii=False)
-    # Task 3 fills in the write branch (uses api parameter).
+
+    # Task 4 will add the no-changes short-circuit here.
+    assert api is not None  # write path always passes a real api
+    try:
+        new_version = api.set_tags(item_key, after_apply, snapshot.version)
+    except VersionConflictError as e:
+        return json.dumps({"error": str(e), "hint": "Re-run remove_tags to retry."})
+    except ZoteroApiError as e:
+        return json.dumps({"error": str(e)})
+
+    plan["status"] = "applied"
+    plan["new_version"] = new_version
+    plan["removed_count"] = len(would_remove)
     return json.dumps(plan, indent=2, ensure_ascii=False)
