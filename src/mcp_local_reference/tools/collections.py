@@ -41,6 +41,7 @@ def register_tools(mcp: FastMCP, config: Config) -> None:
     _register_reparent_collection(mcp, api, zotero)
     _register_delete_collection(mcp, api, zotero)
     _register_add_items_to_collection(mcp, api, zotero)
+    _register_remove_items_from_collection(mcp, api, zotero)
     _ = pdf  # placeholder until suggest_collection_placement is added in Task 15
 
 
@@ -515,6 +516,108 @@ def add_items_to_collection_impl(
             "succeeded": succeeded,
             "failed": failed,
             "already_present": already_present,
+            "not_found": not_found,
+            "status": "partial" if failed else "applied",
+            "dry_run": False,
+        }
+    )
+
+
+def _register_remove_items_from_collection(
+    mcp: FastMCP, api: ZoteroApiClient, zotero: ZoteroClient
+) -> None:
+    @mcp.tool()
+    def remove_items_from_collection(
+        collection_key: str,
+        item_keys: list[str],
+        dry_run: bool = True,
+    ) -> str:
+        """Remove items from a collection (set-difference per item).
+
+        Mirror of add_items_to_collection. Items not currently in the
+        collection are reported under `not_present` and silently skipped.
+        Cap of 25, partial-failure semantics.
+        """
+        return remove_items_from_collection_impl(api, zotero, collection_key, item_keys, dry_run)
+
+
+def remove_items_from_collection_impl(
+    api: ZoteroApiClient,
+    zotero: ZoteroClient,
+    collection_key: str,
+    item_keys: list[str],
+    dry_run: bool,
+) -> str:
+    cleaned = [k.strip() for k in item_keys if k and k.strip()]
+    if not cleaned:
+        return _err("No item keys provided")
+    if len(cleaned) > MAX_ITEMS_PER_CALL:
+        return _err(
+            f"Refusing: {len(cleaned)} items exceeds the per-call cap of "
+            f"{MAX_ITEMS_PER_CALL}. Split into smaller batches."
+        )
+
+    coll_snap = _local_collection_snapshot(zotero, collection_key)
+    if coll_snap is None:
+        return _err(f"Reference '{collection_key}' not found")
+
+    would_remove: list[str] = []
+    not_present: list[str] = []
+    not_found: list[str] = []
+    for k in cleaned:
+        if zotero.get_reference(k) is None:
+            not_found.append(k)
+            continue
+        current = zotero.get_item_collections(k)
+        if collection_key in current:
+            would_remove.append(k)
+        else:
+            not_present.append(k)
+
+    if dry_run:
+        return json.dumps(
+            {
+                "collection_key": collection_key,
+                "would_remove": would_remove,
+                "not_present": not_present,
+                "not_found": not_found,
+                "status": "preview",
+                "dry_run": True,
+            }
+        )
+
+    if not would_remove:
+        return json.dumps(
+            {
+                "collection_key": collection_key,
+                "succeeded": [],
+                "failed": [],
+                "not_present": not_present,
+                "not_found": not_found,
+                "status": "no_changes",
+                "dry_run": False,
+            }
+        )
+
+    succeeded: list[dict[str, Any]] = []
+    failed: list[dict[str, Any]] = []
+    for item_key in would_remove:
+        try:
+            snap = api.get_item(item_key)
+            new_colls = [c for c in snap.collections if c != collection_key]
+            new_version = api.update_item_collections(item_key, new_colls, snap.version)
+            succeeded.append({"item_key": item_key, "new_version": new_version})
+        except MissingCredentialsError as exc:
+            return _err(str(exc))
+        except (VersionConflictError, ZoteroApiError) as exc:
+            failed.append({"item_key": item_key, "reason": str(exc)})
+
+    return json.dumps(
+        {
+            "collection_key": collection_key,
+            "succeeded": succeeded,
+            "failed": failed,
+            "not_present": not_present,
             "not_found": not_found,
             "status": "partial" if failed else "applied",
             "dry_run": False,

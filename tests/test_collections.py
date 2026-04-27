@@ -570,3 +570,76 @@ class TestAddItemsToCollection:
         )
         assert result["status"] == "no_changes"
         assert api.update_item_calls == []
+
+
+# ======================================================================
+# remove_items_from_collection_impl
+# ======================================================================
+
+
+from mcp_local_reference.tools.collections import (  # noqa: E402
+    remove_items_from_collection_impl,
+)
+
+
+class TestRemoveItemsFromCollection:
+    def test_rejects_empty_list(self) -> None:
+        result = json.loads(
+            remove_items_from_collection_impl(
+                _FakeApi(), _FakeZotero(), "AIK11111", [], dry_run=True
+            )
+        )
+        assert "error" in result
+
+    def test_rejects_too_many_items(self) -> None:
+        too_many = [f"K{i:07d}" for i in range(MAX_ITEMS_PER_CALL + 1)]
+        result = json.loads(
+            remove_items_from_collection_impl(
+                _FakeApi(), _FakeZotero(), "AIK11111", too_many, dry_run=True
+            )
+        )
+        assert "error" in result
+
+    def test_dry_run_partitions(self) -> None:
+        zotero = _FakeZotero(
+            collections=[_coll("AIK11111", "AI")],
+            references={"ITEMA": _ref("ITEMA"), "ITEMB": _ref("ITEMB")},
+            item_collections={"ITEMA": ["AIK11111"], "ITEMB": []},
+        )
+        result = json.loads(
+            remove_items_from_collection_impl(
+                _FakeApi(), zotero, "AIK11111", ["ITEMA", "ITEMB"], dry_run=True
+            )
+        )
+        assert result["status"] == "preview"
+        assert result["would_remove"] == ["ITEMA"]
+        assert result["not_present"] == ["ITEMB"]
+
+    def test_write_succeeds_clean(self) -> None:
+        zotero = _FakeZotero(
+            collections=[_coll("AIK11111", "AI")],
+            references={"ITEMA": _ref("ITEMA")},
+            item_collections={"ITEMA": ["AIK11111", "OTHKEY99"]},
+        )
+        api = _FakeApi(
+            item_snapshots={"ITEMA": ItemSnapshot("ITEMA", 10, [], ["AIK11111", "OTHKEY99"], {})},
+            new_version=11,
+        )
+        result = json.loads(
+            remove_items_from_collection_impl(api, zotero, "AIK11111", ["ITEMA"], dry_run=False)
+        )
+        assert result["status"] == "applied"
+        assert api.update_item_calls == [("ITEMA", ["OTHKEY99"], 10)]
+
+    def test_write_short_circuits_when_all_not_present(self) -> None:
+        zotero = _FakeZotero(
+            collections=[_coll("AIK11111", "AI")],
+            references={"ITEMA": _ref("ITEMA")},
+            item_collections={"ITEMA": []},
+        )
+        api = _FakeApi()
+        result = json.loads(
+            remove_items_from_collection_impl(api, zotero, "AIK11111", ["ITEMA"], dry_run=False)
+        )
+        assert result["status"] == "no_changes"
+        assert api.update_item_calls == []
