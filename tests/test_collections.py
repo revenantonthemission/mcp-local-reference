@@ -169,3 +169,81 @@ class TestCheckCycle:
             ]
         )
         assert _check_cycle(zotero, target_key="AIK11111", new_parent_key="TRMK3333") is True
+
+
+# ======================================================================
+# create_collection_impl
+# ======================================================================
+
+
+from mcp_local_reference.tools.collections import create_collection_impl  # noqa: E402
+
+
+class TestCreateCollection:
+    def test_dry_run_reports_preview(self) -> None:
+        zotero = _FakeZotero(collections=[_coll("AIK11111", "AI")])
+        api = _FakeApi()
+        result = json.loads(
+            create_collection_impl(api, zotero, "LLMs", parent_key="AIK11111", dry_run=True)
+        )
+        assert result["status"] == "preview"
+        assert result["would_create"]["name"] == "LLMs"
+        assert result["would_create"]["parent_key"] == "AIK11111"
+        assert api.create_collection_calls == []
+
+    def test_already_exists_short_circuits_dry_run(self) -> None:
+        zotero = _FakeZotero(
+            collections=[_coll("AIK11111", "AI"), _coll("LLMK2222", "LLMs", "AIK11111")]
+        )
+        result = json.loads(
+            create_collection_impl(_FakeApi(), zotero, "LLMs", parent_key="AIK11111", dry_run=True)
+        )
+        assert result["status"] == "already_exists"
+        assert result["existing_key"] == "LLMK2222"
+
+    def test_parent_missing_returns_error(self) -> None:
+        zotero = _FakeZotero(collections=[_coll("AIK11111", "AI")])
+        result = json.loads(
+            create_collection_impl(_FakeApi(), zotero, "LLMs", parent_key="NOPE9999", dry_run=True)
+        )
+        assert "error" in result
+        assert "NOPE9999" in result["error"]
+
+    def test_write_creates_collection(self) -> None:
+        zotero = _FakeZotero(collections=[_coll("AIK11111", "AI")])
+        api = _FakeApi(
+            created_snapshot=CollectionSnapshot(
+                collection_key="LLMK2222",
+                version=5,
+                name="LLMs",
+                parent_key="AIK11111",
+                raw={},
+            )
+        )
+        result = json.loads(
+            create_collection_impl(api, zotero, "LLMs", parent_key="AIK11111", dry_run=False)
+        )
+        assert result["status"] == "applied"
+        assert result["created"]["collection_key"] == "LLMK2222"
+        assert result["new_version"] == 5
+        assert api.create_collection_calls == [("LLMs", "AIK11111")]
+
+    def test_write_short_circuits_when_already_exists(self) -> None:
+        zotero = _FakeZotero(
+            collections=[_coll("AIK11111", "AI"), _coll("LLMK2222", "LLMs", "AIK11111")]
+        )
+        api = _FakeApi()
+        result = json.loads(
+            create_collection_impl(api, zotero, "LLMs", parent_key="AIK11111", dry_run=False)
+        )
+        assert result["status"] == "already_exists"
+        assert api.create_collection_calls == []  # no POST issued
+
+    def test_write_with_missing_credentials_returns_error(self) -> None:
+        zotero = _FakeZotero(collections=[])
+        api = _FakeApi(create_collection_error=MissingCredentialsError("no creds"))
+        result = json.loads(
+            create_collection_impl(api, zotero, "Top", parent_key=None, dry_run=False)
+        )
+        assert "error" in result
+        assert "no creds" in result["error"]

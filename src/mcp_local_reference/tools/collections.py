@@ -35,7 +35,8 @@ def register_tools(mcp: FastMCP, config: Config) -> None:
 
     # Tool registration is added in Tasks 9–15. Each registers one tool.
     # The api/zotero/pdf instances above are passed into each `_register_*`.
-    _ = (api, zotero, pdf)  # placeholder until tools are wired in
+    _register_create_collection(mcp, api, zotero)
+    _ = pdf  # placeholder until suggest_collection_placement is added in Task 15
 
 
 # ----------------------------------------------------------------------
@@ -102,3 +103,90 @@ def _check_cycle(zotero: ZoteroClient, target_key: str, new_parent_key: str) -> 
 
 def _err(message: str) -> str:
     return json.dumps({"error": message})
+
+
+# ----------------------------------------------------------------------
+# create_collection
+# ----------------------------------------------------------------------
+
+
+def _register_create_collection(
+    mcp: FastMCP, api: ZoteroApiClient, zotero: ZoteroClient
+) -> None:
+    @mcp.tool()
+    def create_collection(
+        name: str, parent_key: str | None = None, dry_run: bool = True
+    ) -> str:
+        """Create a new Zotero collection (folder).
+
+        Defaults to dry_run=True. If a collection with the same (name,
+        parent_key) already exists, returns status='already_exists' with
+        the existing key — no duplicate is created.
+
+        Args:
+            name: The collection name. Must be non-empty.
+            parent_key: Parent collection key, or None to create at the
+                library root.
+            dry_run: If True (default), report the preview without writing.
+        """
+        return create_collection_impl(api, zotero, name, parent_key, dry_run)
+
+
+def create_collection_impl(
+    api: ZoteroApiClient,
+    zotero: ZoteroClient,
+    name: str,
+    parent_key: str | None,
+    dry_run: bool,
+) -> str:
+    name = (name or "").strip()
+    if not name:
+        return _err("No collection name provided")
+
+    all_cols = _flatten_tree(zotero.list_collections())
+    by_key = {c.key: c for c in all_cols}
+
+    if parent_key is not None and parent_key not in by_key:
+        return _err(f"Parent collection '{parent_key}' not found")
+
+    existing = next(
+        (c for c in all_cols if c.name == name and c.parent_key == parent_key),
+        None,
+    )
+    if existing is not None:
+        return json.dumps(
+            {
+                "status": "already_exists",
+                "existing_key": existing.key,
+                "name": name,
+                "parent_key": parent_key,
+                "dry_run": dry_run,
+            }
+        )
+
+    if dry_run:
+        return json.dumps(
+            {
+                "status": "preview",
+                "would_create": {"name": name, "parent_key": parent_key},
+                "dry_run": True,
+            }
+        )
+
+    try:
+        snap = api.create_collection(name, parent_key)
+    except (MissingCredentialsError, ZoteroApiError) as exc:
+        return _err(str(exc))
+
+    return json.dumps(
+        {
+            "status": "applied",
+            "created": {
+                "collection_key": snap.collection_key,
+                "name": snap.name,
+                "parent_key": snap.parent_key,
+            },
+            "new_version": snap.version,
+            "dry_run": False,
+        }
+    )
