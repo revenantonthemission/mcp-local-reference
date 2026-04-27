@@ -150,9 +150,7 @@ def _ref(item_key: str, title: str = "", abstract: str = "") -> Reference:
 class TestCheckCycle:
     def test_no_cycle_for_unrelated_collection(self) -> None:
         # AI (no parent), Sinology (no parent). Reparent AI under Sinology — fine.
-        zotero = _FakeZotero(
-            collections=[_coll("AIK11111", "AI"), _coll("SINK2222", "Sinology")]
-        )
+        zotero = _FakeZotero(collections=[_coll("AIK11111", "AI"), _coll("SINK2222", "Sinology")])
         assert _check_cycle(zotero, target_key="AIK11111", new_parent_key="SINK2222") is False
 
     def test_cycle_when_new_parent_is_target(self) -> None:
@@ -247,3 +245,77 @@ class TestCreateCollection:
         )
         assert "error" in result
         assert "no creds" in result["error"]
+
+
+# ======================================================================
+# rename_collection_impl
+# ======================================================================
+
+
+from mcp_local_reference.tools.collections import rename_collection_impl  # noqa: E402
+
+
+class TestRenameCollection:
+    def test_dry_run_reports_preview(self) -> None:
+        zotero = _FakeZotero(collections=[_coll("AIK11111", "AI")])
+        result = json.loads(
+            rename_collection_impl(
+                _FakeApi(), zotero, "AIK11111", "Artificial Intelligence", dry_run=True
+            )
+        )
+        assert result["status"] == "preview"
+        assert result["current"]["name"] == "AI"
+        assert result["after"]["name"] == "Artificial Intelligence"
+
+    def test_dry_run_returns_error_when_collection_missing(self) -> None:
+        result = json.loads(
+            rename_collection_impl(_FakeApi(), _FakeZotero(), "NOPE9999", "X", dry_run=True)
+        )
+        assert "error" in result
+
+    def test_write_renames(self) -> None:
+        zotero = _FakeZotero(collections=[_coll("AIK11111", "AI")])
+        api = _FakeApi(
+            collection_snapshots={"AIK11111": CollectionSnapshot("AIK11111", 7, "AI", None, {})},
+            new_version=8,
+        )
+        result = json.loads(
+            rename_collection_impl(
+                api, zotero, "AIK11111", "Artificial Intelligence", dry_run=False
+            )
+        )
+        assert result["status"] == "applied"
+        assert result["new_version"] == 8
+        assert api.update_collection_calls == [("AIK11111", {"name": "Artificial Intelligence"}, 7)]
+
+    def test_write_no_op_when_name_unchanged(self) -> None:
+        zotero = _FakeZotero(collections=[_coll("AIK11111", "AI")])
+        api = _FakeApi(
+            collection_snapshots={"AIK11111": CollectionSnapshot("AIK11111", 7, "AI", None, {})}
+        )
+        result = json.loads(rename_collection_impl(api, zotero, "AIK11111", "AI", dry_run=False))
+        assert result["status"] == "no_changes"
+        assert api.update_collection_calls == []
+
+    def test_write_refuses_sibling_name_collision(self) -> None:
+        zotero = _FakeZotero(
+            collections=[
+                _coll("AIK11111", "AI"),
+                _coll("OTRK2222", "ML"),
+            ]
+        )
+        result = json.loads(
+            rename_collection_impl(_FakeApi(), zotero, "AIK11111", "ML", dry_run=False)
+        )
+        assert "error" in result
+        assert "ML" in result["error"]
+
+    def test_write_version_conflict_returns_error(self) -> None:
+        zotero = _FakeZotero(collections=[_coll("AIK11111", "AI")])
+        api = _FakeApi(
+            collection_snapshots={"AIK11111": CollectionSnapshot("AIK11111", 7, "AI", None, {})},
+            update_collection_error=VersionConflictError("conflict"),
+        )
+        result = json.loads(rename_collection_impl(api, zotero, "AIK11111", "X", dry_run=False))
+        assert "error" in result
+        assert "conflict" in result["error"]

@@ -36,6 +36,7 @@ def register_tools(mcp: FastMCP, config: Config) -> None:
     # Tool registration is added in Tasks 9–15. Each registers one tool.
     # The api/zotero/pdf instances above are passed into each `_register_*`.
     _register_create_collection(mcp, api, zotero)
+    _register_rename_collection(mcp, api, zotero)
     _ = pdf  # placeholder until suggest_collection_placement is added in Task 15
 
 
@@ -110,13 +111,9 @@ def _err(message: str) -> str:
 # ----------------------------------------------------------------------
 
 
-def _register_create_collection(
-    mcp: FastMCP, api: ZoteroApiClient, zotero: ZoteroClient
-) -> None:
+def _register_create_collection(mcp: FastMCP, api: ZoteroApiClient, zotero: ZoteroClient) -> None:
     @mcp.tool()
-    def create_collection(
-        name: str, parent_key: str | None = None, dry_run: bool = True
-    ) -> str:
+    def create_collection(name: str, parent_key: str | None = None, dry_run: bool = True) -> str:
         """Create a new Zotero collection (folder).
 
         Defaults to dry_run=True. If a collection with the same (name,
@@ -187,6 +184,86 @@ def create_collection_impl(
                 "parent_key": snap.parent_key,
             },
             "new_version": snap.version,
+            "dry_run": False,
+        }
+    )
+
+
+# ----------------------------------------------------------------------
+# rename_collection
+# ----------------------------------------------------------------------
+
+
+def _register_rename_collection(mcp: FastMCP, api: ZoteroApiClient, zotero: ZoteroClient) -> None:
+    @mcp.tool()
+    def rename_collection(collection_key: str, new_name: str, dry_run: bool = True) -> str:
+        """Rename an existing Zotero collection.
+
+        Defaults to dry_run=True. Refuses sibling-name collisions
+        (a collection with the same new_name already under the same
+        parent) for hygiene; Zotero itself permits this.
+        """
+        return rename_collection_impl(api, zotero, collection_key, new_name, dry_run)
+
+
+def rename_collection_impl(
+    api: ZoteroApiClient,
+    zotero: ZoteroClient,
+    collection_key: str,
+    new_name: str,
+    dry_run: bool,
+) -> str:
+    new_name = (new_name or "").strip()
+    if not new_name:
+        return _err("No new name provided")
+
+    local = _local_collection_snapshot(zotero, collection_key)
+    if local is None:
+        return _err(f"Reference '{collection_key}' not found")
+
+    if local.name == new_name:
+        return json.dumps(
+            {
+                "collection_key": collection_key,
+                "current": {"name": local.name, "parent_key": local.parent_key},
+                "status": "no_changes",
+                "dry_run": dry_run,
+            }
+        )
+
+    siblings = [
+        c
+        for c in _flatten_tree(zotero.list_collections())
+        if c.parent_key == local.parent_key and c.key != collection_key
+    ]
+    if any(c.name == new_name for c in siblings):
+        return _err(f"A collection named '{new_name}' already exists under this parent")
+
+    if dry_run:
+        return json.dumps(
+            {
+                "collection_key": collection_key,
+                "current": {"name": local.name, "parent_key": local.parent_key},
+                "would_rename_to": new_name,
+                "after": {"name": new_name, "parent_key": local.parent_key},
+                "status": "preview",
+                "dry_run": True,
+            }
+        )
+
+    try:
+        snap = api.get_collection(collection_key)
+        new_version = api.update_collection(collection_key, name=new_name, version=snap.version)
+    except (MissingCredentialsError, VersionConflictError, ZoteroApiError) as exc:
+        return _err(str(exc))
+
+    return json.dumps(
+        {
+            "collection_key": collection_key,
+            "current": {"name": local.name, "parent_key": local.parent_key},
+            "after": {"name": new_name, "parent_key": local.parent_key},
+            "new_version": new_version,
+            "status": "applied",
             "dry_run": False,
         }
     )
