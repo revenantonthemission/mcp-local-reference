@@ -229,7 +229,7 @@ def _local_snapshot(zotero: ZoteroClient, item_key: str) -> ItemSnapshot | None:
     ref = zotero.get_reference(item_key)
     if ref is None:
         return None
-    return ItemSnapshot(item_key=item_key, version=0, tags=ref.tags, raw={})
+    return ItemSnapshot(item_key=item_key, version=0, tags=ref.tags, collections=[], raw={})
 
 
 def _build_and_maybe_write(

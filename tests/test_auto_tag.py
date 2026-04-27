@@ -76,6 +76,7 @@ class TestZoteroApiClient:
                     "data": {
                         "version": 17,
                         "tags": [{"tag": "ml"}, {"tag": "papers"}],
+                        "collections": ["COLLAAA1", "COLLBBB2"],
                     }
                 },
             )
@@ -85,6 +86,7 @@ class TestZoteroApiClient:
 
         assert snap.version == 17
         assert snap.tags == ["ml", "papers"]
+        assert snap.collections == ["COLLAAA1", "COLLBBB2"]
         assert "users/42/items/ABCD1234" in captured["url"]
         assert captured["api_key"] == "test-key"
 
@@ -227,7 +229,7 @@ class TestApplyTags:
 
     def test_apply_writes_union(self) -> None:
         api = _FakeApi(
-            snapshot=ItemSnapshot(item_key="K", version=5, tags=["a"], raw={}),
+            snapshot=ItemSnapshot(item_key="K", version=5, tags=["a"], collections=[], raw={}),
             new_version=6,
         )
         zotero = _FakeZotero()  # not used when dry_run=False
@@ -240,7 +242,8 @@ class TestApplyTags:
         assert api.set_tags_calls == [("K", ["a", "b", "c"], 5)]
 
     def test_apply_skips_write_when_no_new_tags(self) -> None:
-        api = _FakeApi(snapshot=ItemSnapshot(item_key="K", version=5, tags=["a", "b"], raw={}))
+        snap = ItemSnapshot(item_key="K", version=5, tags=["a", "b"], collections=[], raw={})
+        api = _FakeApi(snapshot=snap)
         zotero = _FakeZotero()
         result = json.loads(
             apply_tags_impl(api, zotero, "K", ["a", "b"], dry_run=False)  # type: ignore[arg-type]
@@ -260,7 +263,7 @@ class TestApplyTags:
 
     def test_version_conflict_returns_hint(self) -> None:
         api = _FakeApi(
-            snapshot=ItemSnapshot(item_key="K", version=5, tags=[], raw={}),
+            snapshot=ItemSnapshot(item_key="K", version=5, tags=[], collections=[], raw={}),
             set_error=VersionConflictError("conflict"),
         )
         zotero = _FakeZotero()
@@ -326,8 +329,9 @@ class TestRemoveTags:
         assert "MISSING" in result["error"]
 
     def test_remove_writes_diff(self) -> None:
+        snap = ItemSnapshot(item_key="K", version=5, tags=["a", "b", "c"], collections=[], raw={})
         api = _FakeApi(
-            snapshot=ItemSnapshot(item_key="K", version=5, tags=["a", "b", "c"], raw={}),
+            snapshot=snap,
             new_version=6,
         )
         zotero = _FakeZotero()  # not used when dry_run=False
@@ -341,7 +345,8 @@ class TestRemoveTags:
         assert api.set_tags_calls == [("K", ["a", "c"], 5)]
 
     def test_remove_skips_write_when_no_tags_match(self) -> None:
-        api = _FakeApi(snapshot=ItemSnapshot(item_key="K", version=5, tags=["a", "b"], raw={}))
+        snap = ItemSnapshot(item_key="K", version=5, tags=["a", "b"], collections=[], raw={})
+        api = _FakeApi(snapshot=snap)
         zotero = _FakeZotero()
         result = json.loads(
             remove_tags_impl(api, zotero, "K", ["x", "y"], dry_run=False)  # type: ignore[arg-type]
@@ -353,7 +358,7 @@ class TestRemoveTags:
 
     def test_remove_idempotent_partial_match(self) -> None:
         api = _FakeApi(
-            snapshot=ItemSnapshot(item_key="K", version=5, tags=["a", "b"], raw={}),
+            snapshot=ItemSnapshot(item_key="K", version=5, tags=["a", "b"], collections=[], raw={}),
             new_version=6,
         )
         zotero = _FakeZotero()
@@ -368,7 +373,7 @@ class TestRemoveTags:
 
     def test_remove_can_clear_all_tags(self) -> None:
         api = _FakeApi(
-            snapshot=ItemSnapshot(item_key="K", version=5, tags=["a", "b"], raw={}),
+            snapshot=ItemSnapshot(item_key="K", version=5, tags=["a", "b"], collections=[], raw={}),
             new_version=6,
         )
         zotero = _FakeZotero()
@@ -391,7 +396,7 @@ class TestRemoveTags:
 
     def test_remove_version_conflict_returns_hint(self) -> None:
         api = _FakeApi(
-            snapshot=ItemSnapshot(item_key="K", version=5, tags=["x"], raw={}),
+            snapshot=ItemSnapshot(item_key="K", version=5, tags=["x"], collections=[], raw={}),
             set_error=VersionConflictError("conflict"),
         )
         zotero = _FakeZotero()

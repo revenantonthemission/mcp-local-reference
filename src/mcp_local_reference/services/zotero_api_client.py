@@ -35,6 +35,7 @@ class ItemSnapshot:
     item_key: str
     version: int
     tags: list[str]
+    collections: list[str]
     raw: dict[str, Any]
 
 
@@ -74,6 +75,7 @@ class ZoteroApiClient:
             item_key=item_key,
             version=int(data.get("version", 0)),
             tags=[t["tag"] for t in data.get("tags", []) if "tag" in t],
+            collections=list(data.get("collections", [])),
             raw=data,
         )
 
