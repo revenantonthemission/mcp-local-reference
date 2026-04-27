@@ -1,45 +1,43 @@
-"""Configuration for the MCP Local Reference server."""
+"""Configuration for the MCP Local Reference server.
+
+Backed by ``pydantic-settings``: every field is overridable via the
+matching environment variable (case-insensitive), with a per-field
+``validation_alias`` used when the env-var name doesn't follow the
+field name.
+"""
 
 from __future__ import annotations
 
-import os
-import platform
-from dataclasses import dataclass, field
 from pathlib import Path
 
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
-def _default_zotero_dir() -> Path:
-    """Detect the default Zotero data directory for the current platform."""
-    system = platform.system()
-    home = Path.home()
-
-    if system == "Darwin":
-        return home / "Zotero"
-    elif system == "Windows":
-        return home / "Zotero"
-    else:  # Linux and others
-        return home / "Zotero"
+_ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 
 
-@dataclass
-class Config:
-    """Server configuration, populated from environment variables with sensible defaults."""
+class Config(BaseSettings):
+    """Server configuration, populated from environment variables."""
 
-    zotero_data_dir: Path = field(
-        default_factory=lambda: Path(os.environ.get("ZOTERO_DATA_DIR", str(_default_zotero_dir())))
+    model_config = SettingsConfigDict(
+        env_file=str(_ENV_FILE),
+        case_sensitive=False,
+        env_ignore_empty=True,
+        extra="ignore",
+        populate_by_name=True,
     )
-    data_dir: Path = field(
-        default_factory=lambda: Path(
-            os.environ.get("MCP_DATA_DIR", str(Path.home() / ".mcp-local-reference"))
-        )
+
+    zotero_data_dir: Path = Field(default_factory=lambda: Path.home() / "Zotero")
+    data_dir: Path = Field(
+        default_factory=lambda: Path.home() / ".mcp-local-reference",
+        validation_alias="MCP_DATA_DIR",
     )
-    figure_dpi: int = field(default_factory=lambda: int(os.environ.get("FIGURE_DPI", "300")))
-    min_figure_pixels: int = field(
-        default_factory=lambda: int(os.environ.get("MIN_FIGURE_PIXELS", "10000"))
-    )
-    local_pdf_dir: Path | None = field(
-        default_factory=lambda: Path(d) if (d := os.environ.get("LOCAL_PDF_DIR")) else None
-    )
+    figure_dpi: int = 300
+    min_figure_pixels: int = 10_000
+    local_pdf_dir: Path | None = None
+    zotero_user_id: str = ""
+    zotero_api_key: str = ""
+    zotero_api_base_url: str = "https://api.zotero.org"
 
     @property
     def zotero_db_path(self) -> Path:

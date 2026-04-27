@@ -240,6 +240,31 @@ class ZoteroClient:
         finally:
             conn.close()
 
+    def top_tags(self, limit: int = 30) -> list[tuple[str, int]]:
+        """Return the most-used tags in the library as (name, usage_count) pairs.
+
+        Used to anchor LLM tag suggestions to the user's existing tag vocabulary
+        — without this, suggestions tend to invent synonyms (`ml` vs
+        `machine-learning` vs `ML`) instead of reusing established tags.
+        """
+        conn = self._connect()
+        try:
+            cursor = conn.execute(
+                """
+                SELECT t.name, COUNT(*) AS uses
+                FROM itemTags it
+                JOIN tags t ON it.tagID = t.tagID
+                WHERE it.itemID NOT IN (SELECT itemID FROM deletedItems)
+                GROUP BY t.tagID
+                ORDER BY uses DESC, t.name ASC
+                LIMIT ?
+                """,
+                (limit,),
+            )
+            return [(row["name"], row["uses"]) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
     def get_all_references(self) -> list[Reference]:
         """Return every non-deleted reference (used for vector indexing)."""
         conn = self._connect()

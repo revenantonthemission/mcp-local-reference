@@ -12,6 +12,7 @@ class Settings(BaseSettings):
         env_prefix="CODE_MCP_",
         env_file=".env",
         env_file_encoding="utf-8",
+        extra="ignore",
     )
 
     # Source repos directory
