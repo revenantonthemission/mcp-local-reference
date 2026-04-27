@@ -16,6 +16,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp_local_reference.config import Config
 from mcp_local_reference.services.pdf_processor import PdfProcessor
 from mcp_local_reference.services.zotero_api_client import (
+    ItemSnapshot,
     MissingCredentialsError,
     VersionConflictError,
     ZoteroApiClient,
@@ -58,12 +59,17 @@ def register_tools(mcp: FastMCP, config: Config) -> None:
         (``If-Unmodified-Since-Version``) so concurrent edits fail loudly
         rather than silently overwriting.
 
+        Dry-run reads ``current_tags`` from the local Zotero SQLite (no
+        Web API credentials required), which makes prompt iteration
+        cheap. The real write always re-fetches from the Web API for
+        the authoritative version number.
+
         Args:
             item_key: The 8-character Zotero item key.
             tags: Tags to add. Empty strings and duplicates are ignored.
             dry_run: If True (default), report the diff without writing.
         """
-        return apply_tags_impl(api, item_key, tags, dry_run)
+        return apply_tags_impl(api, zotero, item_key, tags, dry_run)
 
 
 # ======================================================================
@@ -107,7 +113,13 @@ def _pdf_first_page_snippet(zotero: ZoteroClient, pdf: PdfProcessor, item_key: s
     return text[:PDF_SNIPPET_CHAR_CAP]
 
 
-def apply_tags_impl(api: ZoteroApiClient, item_key: str, tags: list[str], dry_run: bool) -> str:
+def apply_tags_impl(
+    api: ZoteroApiClient,
+    zotero: ZoteroClient,
+    item_key: str,
+    tags: list[str],
+    dry_run: bool,
+) -> str:
     proposed = sorted({t.strip() for t in tags if t and t.strip()})
     if not proposed:
         return json.dumps({"error": "No non-empty tags provided"})
@@ -121,14 +133,32 @@ def apply_tags_impl(api: ZoteroApiClient, item_key: str, tags: list[str], dry_ru
             }
         )
 
-    try:
-        snapshot = api.get_item(item_key)
-    except MissingCredentialsError as e:
-        return json.dumps({"error": str(e)})
-    except ZoteroApiError as e:
-        return json.dumps({"error": str(e)})
+    if dry_run:
+        snapshot = _local_snapshot(zotero, item_key)
+        if snapshot is None:
+            return json.dumps({"error": f"Reference '{item_key}' not found"})
+    else:
+        try:
+            snapshot = api.get_item(item_key)
+        except MissingCredentialsError as e:
+            return json.dumps({"error": str(e)})
+        except ZoteroApiError as e:
+            return json.dumps({"error": str(e)})
 
     return _build_and_maybe_write(api, snapshot, item_key, proposed, dry_run)
+
+
+def _local_snapshot(zotero: ZoteroClient, item_key: str) -> ItemSnapshot | None:
+    """Build an ItemSnapshot from local SQLite for dry-run previews.
+
+    Returns version=0 deliberately: a local snapshot must never be used
+    for a write, and version=0 guarantees that any accidental ``set_tags``
+    call would fail with HTTP 412 rather than silently corrupting data.
+    """
+    ref = zotero.get_reference(item_key)
+    if ref is None:
+        return None
+    return ItemSnapshot(item_key=item_key, version=0, tags=ref.tags, raw={})
 
 
 def _build_and_maybe_write(

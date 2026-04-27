@@ -22,7 +22,7 @@ from mcp_local_reference.services.zotero_api_client import (
     ZoteroApiClient,
     ZoteroApiError,
 )
-from mcp_local_reference.services.zotero_client import ZoteroClient
+from mcp_local_reference.services.zotero_client import Reference, ZoteroClient
 from mcp_local_reference.tools.auto_tag import (
     MAX_TAGS_PER_CALL,
     apply_tags_impl,
@@ -161,21 +161,42 @@ class _FakeApi:
         return self.new_version
 
 
+class _FakeZotero:
+    """Minimal stand-in for ZoteroClient — only get_reference is exercised."""
+
+    def __init__(self, references: dict[str, Reference] | None = None) -> None:
+        self.references = references or {}
+
+    def get_reference(self, item_key: str) -> Reference | None:
+        return self.references.get(item_key)
+
+
+def _ref(item_key: str, tags: list[str]) -> Reference:
+    return Reference(item_key=item_key, item_type="journalArticle", tags=tags)
+
+
 class TestApplyTags:
     def test_rejects_empty_tags(self) -> None:
-        result = json.loads(apply_tags_impl(_FakeApi(), "K", ["", "  "], dry_run=False))  # type: ignore[arg-type]
+        result = json.loads(
+            apply_tags_impl(_FakeApi(), _FakeZotero(), "K", ["", "  "], dry_run=True)  # type: ignore[arg-type]
+        )
         assert "error" in result
 
     def test_rejects_too_many_tags(self) -> None:
         too_many = [f"t{i}" for i in range(MAX_TAGS_PER_CALL + 1)]
-        result = json.loads(apply_tags_impl(_FakeApi(), "K", too_many, dry_run=False))  # type: ignore[arg-type]
+        result = json.loads(
+            apply_tags_impl(_FakeApi(), _FakeZotero(), "K", too_many, dry_run=True)  # type: ignore[arg-type]
+        )
         assert "error" in result
         assert "exceeds" in result["error"]
 
-    def test_dry_run_returns_preview_without_writing(self) -> None:
-        api = _FakeApi(snapshot=ItemSnapshot(item_key="K", version=5, tags=["existing"], raw={}))
+    def test_dry_run_reads_local_and_skips_api(self) -> None:
+        # _FakeApi() with no snapshot would AssertionError if get_item were called —
+        # so a passing test proves the dry-run path never hits the API.
+        api = _FakeApi()
+        zotero = _FakeZotero({"K": _ref("K", ["existing"])})
         result = json.loads(
-            apply_tags_impl(api, "K", ["new", "existing"], dry_run=True)  # type: ignore[arg-type]
+            apply_tags_impl(api, zotero, "K", ["new", "existing"], dry_run=True)  # type: ignore[arg-type]
         )
         assert result["status"] == "preview"
         assert result["would_add"] == ["new"]
@@ -183,13 +204,34 @@ class TestApplyTags:
         assert result["after_apply"] == ["existing", "new"]
         assert api.set_tags_calls == []
 
+    def test_dry_run_works_without_credentials(self) -> None:
+        # If the credential check were still on the dry-run path, this would fail.
+        api = _FakeApi(get_error=MissingCredentialsError("set creds"))
+        zotero = _FakeZotero({"K": _ref("K", [])})
+        result = json.loads(
+            apply_tags_impl(api, zotero, "K", ["new"], dry_run=True)  # type: ignore[arg-type]
+        )
+        assert result["status"] == "preview"
+        assert result["would_add"] == ["new"]
+        assert "error" not in result
+
+    def test_dry_run_returns_error_when_item_missing_locally(self) -> None:
+        api = _FakeApi()
+        zotero = _FakeZotero()  # empty — no items
+        result = json.loads(
+            apply_tags_impl(api, zotero, "MISSING", ["new"], dry_run=True)  # type: ignore[arg-type]
+        )
+        assert "error" in result
+        assert "MISSING" in result["error"]
+
     def test_apply_writes_union(self) -> None:
         api = _FakeApi(
             snapshot=ItemSnapshot(item_key="K", version=5, tags=["a"], raw={}),
             new_version=6,
         )
+        zotero = _FakeZotero()  # not used when dry_run=False
         result = json.loads(
-            apply_tags_impl(api, "K", ["b", "c"], dry_run=False)  # type: ignore[arg-type]
+            apply_tags_impl(api, zotero, "K", ["b", "c"], dry_run=False)  # type: ignore[arg-type]
         )
         assert result["status"] == "applied"
         assert result["new_version"] == 6
@@ -198,15 +240,19 @@ class TestApplyTags:
 
     def test_apply_skips_write_when_no_new_tags(self) -> None:
         api = _FakeApi(snapshot=ItemSnapshot(item_key="K", version=5, tags=["a", "b"], raw={}))
+        zotero = _FakeZotero()
         result = json.loads(
-            apply_tags_impl(api, "K", ["a", "b"], dry_run=False)  # type: ignore[arg-type]
+            apply_tags_impl(api, zotero, "K", ["a", "b"], dry_run=False)  # type: ignore[arg-type]
         )
         assert result["status"] == "no_changes"
         assert api.set_tags_calls == []
 
-    def test_missing_credentials_returns_error(self) -> None:
+    def test_apply_with_missing_credentials_returns_error(self) -> None:
         api = _FakeApi(get_error=MissingCredentialsError("set creds"))
-        result = json.loads(apply_tags_impl(api, "K", ["x"], dry_run=False))  # type: ignore[arg-type]
+        zotero = _FakeZotero()
+        result = json.loads(
+            apply_tags_impl(api, zotero, "K", ["x"], dry_run=False)  # type: ignore[arg-type]
+        )
         assert "error" in result
         assert "creds" in result["error"]
 
@@ -215,7 +261,10 @@ class TestApplyTags:
             snapshot=ItemSnapshot(item_key="K", version=5, tags=[], raw={}),
             set_error=VersionConflictError("conflict"),
         )
-        result = json.loads(apply_tags_impl(api, "K", ["x"], dry_run=False))  # type: ignore[arg-type]
+        zotero = _FakeZotero()
+        result = json.loads(
+            apply_tags_impl(api, zotero, "K", ["x"], dry_run=False)  # type: ignore[arg-type]
+        )
         assert "error" in result
         assert "hint" in result
 
