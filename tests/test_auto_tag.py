@@ -26,6 +26,7 @@ from mcp_local_reference.services.zotero_client import Reference, ZoteroClient
 from mcp_local_reference.tools.auto_tag import (
     MAX_TAGS_PER_CALL,
     apply_tags_impl,
+    remove_tags_impl,
     suggest_tags_context_impl,
 )
 
@@ -267,6 +268,27 @@ class TestApplyTags:
         )
         assert "error" in result
         assert "hint" in result
+
+
+# ======================================================================
+# remove_tags_impl — orchestration via the same fakes
+# ======================================================================
+
+
+class TestRemoveTags:
+    def test_rejects_empty_tags(self) -> None:
+        result = json.loads(
+            remove_tags_impl(_FakeApi(), _FakeZotero(), "K", ["", "  "], dry_run=True)  # type: ignore[arg-type]
+        )
+        assert "error" in result
+
+    def test_rejects_too_many_tags(self) -> None:
+        too_many = [f"t{i}" for i in range(MAX_TAGS_PER_CALL + 1)]
+        result = json.loads(
+            remove_tags_impl(_FakeApi(), _FakeZotero(), "K", too_many, dry_run=True)  # type: ignore[arg-type]
+        )
+        assert "error" in result
+        assert "exceeds" in result["error"]
 
 
 # ======================================================================

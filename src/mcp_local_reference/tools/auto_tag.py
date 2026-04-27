@@ -35,6 +35,14 @@ def register_tools(mcp: FastMCP, config: Config) -> None:
     api = ZoteroApiClient(config)
     pdf = PdfProcessor(min_figure_pixels=config.min_figure_pixels)
 
+    _register_suggest_tags_context(mcp, zotero, pdf)
+    _register_apply_tags(mcp, api, zotero)
+    _register_remove_tags(mcp, api, zotero)
+
+
+def _register_suggest_tags_context(
+    mcp: FastMCP, zotero: ZoteroClient, pdf: PdfProcessor
+) -> None:
     @mcp.tool()
     def suggest_tags_context(item_key: str) -> str:
         """Gather everything Claude needs to suggest tags for one Zotero item.
@@ -49,6 +57,10 @@ def register_tools(mcp: FastMCP, config: Config) -> None:
         """
         return suggest_tags_context_impl(zotero, pdf, item_key)
 
+
+def _register_apply_tags(
+    mcp: FastMCP, api: ZoteroApiClient, zotero: ZoteroClient
+) -> None:
     @mcp.tool()
     def apply_tags(item_key: str, tags: list[str], dry_run: bool = True) -> str:
         """Add tags to a Zotero item via the Web API (append-only merge).
@@ -70,6 +82,32 @@ def register_tools(mcp: FastMCP, config: Config) -> None:
             dry_run: If True (default), report the diff without writing.
         """
         return apply_tags_impl(api, zotero, item_key, tags, dry_run)
+
+
+def _register_remove_tags(
+    mcp: FastMCP, api: ZoteroApiClient, zotero: ZoteroClient
+) -> None:
+    @mcp.tool()
+    def remove_tags(item_key: str, tags: list[str], dry_run: bool = True) -> str:
+        """Remove tags from a Zotero item via the Web API.
+
+        Mirrors apply_tags but in reverse: tags listed here are *removed*
+        from the item's tag list. Defaults to dry_run=True. Idempotent —
+        tags not present on the item are silently skipped and reported
+        under not_present in the response. Per-call cap matches apply_tags
+        (25) to guard against runaway batch destruction.
+
+        Designed for fixing tags that auto-tagging or import workflows
+        added incorrectly. Should NOT be used on Claude's own judgment —
+        only invoke when the user explicitly identifies tags to remove.
+
+        Args:
+            item_key: The 8-character Zotero item key.
+            tags: Tags to remove. Empty strings and duplicates are ignored.
+                Tags not currently on the item are silently skipped.
+            dry_run: If True (default), report the diff without writing.
+        """
+        return remove_tags_impl(api, zotero, item_key, tags, dry_run)
 
 
 # ======================================================================
@@ -113,6 +151,28 @@ def _pdf_first_page_snippet(zotero: ZoteroClient, pdf: PdfProcessor, item_key: s
     return text[:PDF_SNIPPET_CHAR_CAP]
 
 
+def _validate_tags_input(tags: list[str], action: str) -> tuple[list[str], str | None]:
+    """Normalise *tags* and enforce the per-call cap.
+
+    Returns ``(proposed, None)`` on success or ``([], error_json)`` on
+    failure, where *action* is a short noun used in the error message
+    (e.g. ``"tagging"`` or ``"removal"``).
+    """
+    proposed = sorted({t.strip() for t in tags if t and t.strip()})
+    if not proposed:
+        return [], json.dumps({"error": "No non-empty tags provided"})
+    if len(proposed) > MAX_TAGS_PER_CALL:
+        return [], json.dumps(
+            {
+                "error": (
+                    f"Refusing: {len(proposed)} tags exceeds the per-call cap of "
+                    f"{MAX_TAGS_PER_CALL} (guards against runaway batch {action})."
+                )
+            }
+        )
+    return proposed, None
+
+
 def apply_tags_impl(
     api: ZoteroApiClient,
     zotero: ZoteroClient,
@@ -120,18 +180,9 @@ def apply_tags_impl(
     tags: list[str],
     dry_run: bool,
 ) -> str:
-    proposed = sorted({t.strip() for t in tags if t and t.strip()})
-    if not proposed:
-        return json.dumps({"error": "No non-empty tags provided"})
-    if len(proposed) > MAX_TAGS_PER_CALL:
-        return json.dumps(
-            {
-                "error": (
-                    f"Refusing: {len(proposed)} tags exceeds the per-call cap of "
-                    f"{MAX_TAGS_PER_CALL} (guards against runaway batch tagging)."
-                )
-            }
-        )
+    proposed, err = _validate_tags_input(tags, "tagging")
+    if err is not None:
+        return err
 
     if dry_run:
         snapshot = _local_snapshot(zotero, item_key)
@@ -201,3 +252,18 @@ def _build_and_maybe_write(
     plan["new_version"] = new_version
     plan["added_count"] = len(new_tags)
     return json.dumps(plan, indent=2, ensure_ascii=False)
+
+
+def remove_tags_impl(
+    api: ZoteroApiClient,
+    zotero: ZoteroClient,
+    item_key: str,
+    tags: list[str],
+    dry_run: bool,
+) -> str:
+    proposed, err = _validate_tags_input(tags, "removal")
+    if err is not None:
+        return err
+    # TODO(Task 2): dry-run path
+    # TODO(Task 3): write path
+    return json.dumps({"error": "remove_tags not fully implemented yet"})
