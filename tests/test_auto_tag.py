@@ -314,6 +314,29 @@ class TestZoteroApiClient:
         with pytest.raises(VersionConflictError):
             client.delete_collection("COLL1234", version=15)
 
+    def test_update_item_collections_sends_patch_with_version(
+        self, api_config: Config
+    ) -> None:
+        captured: dict[str, object] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured["method"] = request.method
+            captured["url"] = str(request.url)
+            captured["unmod"] = request.headers.get("If-Unmodified-Since-Version")
+            captured["body"] = json.loads(request.content)
+            return httpx.Response(204, headers={"Last-Modified-Version": "21"})
+
+        client = ZoteroApiClient(api_config, transport=httpx.MockTransport(handler))
+        new_version = client.update_item_collections(
+            "ITEMAAAA", ["COLL1111", "COLL2222"], version=20
+        )
+
+        assert new_version == 21
+        assert captured["method"] == "PATCH"
+        assert "users/42/items/ITEMAAAA" in str(captured["url"])
+        assert captured["unmod"] == "20"
+        assert captured["body"] == {"collections": ["COLL1111", "COLL2222"]}
+
 
 # ======================================================================
 # apply_tags_impl — orchestration via a fake API

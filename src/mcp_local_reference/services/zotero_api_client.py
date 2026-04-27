@@ -120,6 +120,35 @@ class ZoteroApiClient:
         new_version = response.headers.get("Last-Modified-Version")
         return int(new_version) if new_version else version + 1
 
+    def update_item_collections(
+        self,
+        item_key: str,
+        collection_keys: list[str],
+        version: int,
+    ) -> int:
+        """PATCH the item's `collections` array; returns the new item version.
+
+        Sibling of `set_tags`: same endpoint pattern, same concurrency
+        story (If-Unmodified-Since-Version). Pass the FULL desired list,
+        not a diff — Zotero's PATCH replaces the array.
+        """
+        self._require_credentials()
+        url = self._item_url(item_key)
+        headers = {**self._headers(), "If-Unmodified-Since-Version": str(version)}
+        body = {"collections": list(collection_keys)}
+        with self._client(headers) as client:
+            response = client.patch(url, json=body)
+        if response.status_code == 412:
+            raise VersionConflictError(
+                f"Item '{item_key}' was modified since version {version}; "
+                "refetch and retry"
+            )
+        if response.status_code == 404:
+            raise ZoteroApiError(f"Item '{item_key}' not found")
+        response.raise_for_status()
+        new_version = response.headers.get("Last-Modified-Version")
+        return int(new_version) if new_version else version + 1
+
     # ------------------------------------------------------------------
     # Collection-object operations
     # ------------------------------------------------------------------
