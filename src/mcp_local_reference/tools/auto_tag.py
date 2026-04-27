@@ -1,9 +1,9 @@
 """Auto-tagging tools — read context for Claude, then write tags via the Zotero Web API.
 
 Designed for the human-in-the-loop pattern: ``suggest_tags_context`` gathers
-everything Claude needs to propose tags, Claude reasons in between, and
-``apply_tags`` writes the result. Defaults to dry-run so a typo doesn't
-silently mutate the user's library.
+everything Claude needs to propose tags; Claude reasons in between; ``apply_tags``
+writes additions; ``remove_tags`` writes removals. Both write tools default to
+dry-run so a typo doesn't silently mutate the user's library.
 """
 
 from __future__ import annotations
