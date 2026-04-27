@@ -290,6 +290,40 @@ class TestRemoveTags:
         assert "error" in result
         assert "exceeds" in result["error"]
 
+    def test_dry_run_reads_local_and_skips_api(self) -> None:
+        # _FakeApi() with no snapshot would AssertionError if get_item were called —
+        # passing this test proves the dry-run path never hits the API.
+        api = _FakeApi()
+        zotero = _FakeZotero({"K": _ref("K", ["existing", "to-remove"])})
+        result = json.loads(
+            remove_tags_impl(api, zotero, "K", ["to-remove", "absent"], dry_run=True)  # type: ignore[arg-type]
+        )
+        assert result["status"] == "preview"
+        assert result["would_remove"] == ["to-remove"]
+        assert result["not_present"] == ["absent"]
+        assert result["after_apply"] == ["existing"]
+        assert api.set_tags_calls == []
+
+    def test_dry_run_works_without_credentials(self) -> None:
+        # If the credential check were on the dry-run path, this would fail.
+        api = _FakeApi(get_error=MissingCredentialsError("set creds"))
+        zotero = _FakeZotero({"K": _ref("K", ["x"])})
+        result = json.loads(
+            remove_tags_impl(api, zotero, "K", ["x"], dry_run=True)  # type: ignore[arg-type]
+        )
+        assert result["status"] == "preview"
+        assert result["would_remove"] == ["x"]
+        assert "error" not in result
+
+    def test_dry_run_returns_error_when_item_missing_locally(self) -> None:
+        api = _FakeApi()
+        zotero = _FakeZotero()  # empty — no items
+        result = json.loads(
+            remove_tags_impl(api, zotero, "MISSING", ["x"], dry_run=True)  # type: ignore[arg-type]
+        )
+        assert "error" in result
+        assert "MISSING" in result["error"]
+
 
 # ======================================================================
 # suggest_tags_context_impl — uses real ZoteroClient against the mock DB

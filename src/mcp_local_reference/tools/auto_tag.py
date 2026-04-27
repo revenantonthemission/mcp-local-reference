@@ -258,6 +258,42 @@ def remove_tags_impl(
     proposed, err = _validate_tags_input(tags, "removal")
     if err is not None:
         return err
-    # TODO(Task 2): dry-run path
-    # TODO(Task 3): write path
-    return json.dumps({"error": "remove_tags not fully implemented yet"})
+
+    if dry_run:
+        snapshot = _local_snapshot(zotero, item_key)
+        if snapshot is None:
+            return json.dumps({"error": f"Reference '{item_key}' not found"})
+    else:
+        # TODO(Task 3): write path
+        return json.dumps({"error": "remove_tags write path not implemented yet"})
+
+    return _build_remove_plan(snapshot, item_key, proposed, dry_run, api=None)
+
+
+def _build_remove_plan(
+    snapshot: Any,
+    item_key: str,
+    proposed: list[str],
+    dry_run: bool,
+    api: ZoteroApiClient | None,
+) -> str:
+    current = set(snapshot.tags)
+    proposed_set = set(proposed)
+    would_remove = sorted(proposed_set & current)
+    not_present = sorted(proposed_set - current)
+    after_apply = sorted(current - proposed_set)
+
+    plan: dict[str, Any] = {
+        "item_key": item_key,
+        "current_tags": sorted(current),
+        "would_remove": would_remove,
+        "not_present": not_present,
+        "after_apply": after_apply,
+        "dry_run": dry_run,
+    }
+
+    if dry_run:
+        plan["status"] = "preview"
+        return json.dumps(plan, indent=2, ensure_ascii=False)
+    # Task 3 fills in the write branch (uses api parameter).
+    return json.dumps(plan, indent=2, ensure_ascii=False)
