@@ -7,23 +7,19 @@ orchestration tests via a small _FakeApi / _FakeZotero pair.
 
 from __future__ import annotations
 
-import json  # noqa: F401 — used by future tool test classes
-from dataclasses import dataclass  # noqa: F401 — used by future tool test classes
-
-import pytest  # noqa: F401 — used by future tool test classes
+import json
 
 from mcp_local_reference.services.zotero_api_client import (
     CollectionSnapshot,
     ItemSnapshot,
-    MissingCredentialsError,  # noqa: F401 — used by future tool test classes
-    VersionConflictError,  # noqa: F401 — used by future tool test classes
-    ZoteroApiError,  # noqa: F401 — used by future tool test classes
+    MissingCredentialsError,
+    VersionConflictError,
+    ZoteroApiError,  # noqa: F401 — used by _FakeApi stubs
 )
 from mcp_local_reference.services.zotero_client import Collection, Reference
 from mcp_local_reference.tools.collections import (
-    MAX_ITEMS_PER_CALL,  # noqa: F401 — used by future tool test classes
+    MAX_ITEMS_PER_CALL,
     _check_cycle,
-    _local_collection_snapshot,  # noqa: F401 — used by future tool test classes
     reparent_collection_impl,
 )
 
@@ -571,6 +567,24 @@ class TestAddItemsToCollection:
         assert result["status"] == "no_changes"
         assert api.update_item_calls == []
 
+    def test_write_missing_creds_aborts_loop(self) -> None:
+        """MissingCredentialsError on the FIRST get_item must abort.
+        No further items attempted; result must be a top-level error,
+        not a `partial` payload."""
+        zotero = _FakeZotero(
+            collections=[_coll("AIK11111", "AI")],
+            references={"ITEMA": _ref("ITEMA"), "ITEMB": _ref("ITEMB")},
+            item_collections={"ITEMA": [], "ITEMB": []},
+        )
+        api = _FakeApi(get_item_error=MissingCredentialsError("no creds"))
+        result = json.loads(
+            add_items_to_collection_impl(
+                api, zotero, "AIK11111", ["ITEMA", "ITEMB"], dry_run=False
+            )
+        )
+        assert "error" in result
+        assert "no creds" in result["error"]
+
 
 # ======================================================================
 # remove_items_from_collection_impl
@@ -643,6 +657,35 @@ class TestRemoveItemsFromCollection:
         )
         assert result["status"] == "no_changes"
         assert api.update_item_calls == []
+
+    def test_write_records_partial_failure(self) -> None:
+        zotero = _FakeZotero(
+            collections=[_coll("AIK11111", "AI")],
+            references={"ITEMA": _ref("ITEMA"), "ITEMB": _ref("ITEMB")},
+            item_collections={"ITEMA": ["AIK11111"], "ITEMB": ["AIK11111"]},
+        )
+        snapshots = {
+            "ITEMA": ItemSnapshot("ITEMA", 10, [], ["AIK11111"], {}),
+            "ITEMB": ItemSnapshot("ITEMB", 20, [], ["AIK11111"], {}),
+        }
+
+        class _PartialApi(_FakeApi):
+            def update_item_collections(self, item_key, collection_keys, version):
+                self.update_item_calls.append((item_key, list(collection_keys), version))
+                if item_key == "ITEMB":
+                    raise VersionConflictError("conflict on ITEMB")
+                return self.new_version
+
+        api = _PartialApi(item_snapshots=snapshots, new_version=11)
+        result = json.loads(
+            remove_items_from_collection_impl(
+                api, zotero, "AIK11111", ["ITEMA", "ITEMB"], dry_run=False
+            )
+        )
+        assert result["status"] == "partial"
+        assert result["succeeded"] == [{"item_key": "ITEMA", "new_version": 11}]
+        assert len(result["failed"]) == 1
+        assert result["failed"][0]["item_key"] == "ITEMB"
 
 
 # ======================================================================

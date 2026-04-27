@@ -17,7 +17,6 @@ from mcp_local_reference.config import Config
 from mcp_local_reference.services.pdf_processor import PdfProcessor
 from mcp_local_reference.services.zotero_api_client import (
     CollectionSnapshot,
-    ItemSnapshot,  # noqa: F401 — used by future tool implementations
     MissingCredentialsError,
     VersionConflictError,
     ZoteroApiClient,
