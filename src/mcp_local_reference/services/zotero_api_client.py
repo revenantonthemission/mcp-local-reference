@@ -203,6 +203,22 @@ class ZoteroApiClient:
         new_version = response.headers.get("Last-Modified-Version")
         return int(new_version) if new_version else version + 1
 
+    def delete_collection(self, collection_key: str, version: int) -> None:
+        """DELETE a collection. Items lose this membership but are not deleted."""
+        self._require_credentials()
+        url = self._collection_url(collection_key)
+        headers = {**self._headers(), "If-Unmodified-Since-Version": str(version)}
+        with self._client(headers) as client:
+            response = client.delete(url)
+        if response.status_code == 412:
+            raise VersionConflictError(
+                f"Collection '{collection_key}' was modified since version {version}; "
+                "refetch and retry"
+            )
+        if response.status_code == 404:
+            raise ZoteroApiError(f"Collection '{collection_key}' not found")
+        response.raise_for_status()
+
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------

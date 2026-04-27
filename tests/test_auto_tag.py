@@ -290,6 +290,30 @@ class TestZoteroApiClient:
         with pytest.raises(VersionConflictError):
             client.update_collection("COLL1234", name="X", version=10)
 
+    def test_delete_collection_sends_delete_with_version(
+        self, api_config: Config
+    ) -> None:
+        captured: dict[str, object] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured["method"] = request.method
+            captured["url"] = str(request.url)
+            captured["unmod"] = request.headers.get("If-Unmodified-Since-Version")
+            return httpx.Response(204)
+
+        client = ZoteroApiClient(api_config, transport=httpx.MockTransport(handler))
+        client.delete_collection("COLL1234", version=15)
+
+        assert captured["method"] == "DELETE"
+        assert "users/42/collections/COLL1234" in str(captured["url"])
+        assert captured["unmod"] == "15"
+
+    def test_delete_collection_412_raises_conflict(self, api_config: Config) -> None:
+        transport = httpx.MockTransport(lambda r: httpx.Response(412))
+        client = ZoteroApiClient(api_config, transport=transport)
+        with pytest.raises(VersionConflictError):
+            client.delete_collection("COLL1234", version=15)
+
 
 # ======================================================================
 # apply_tags_impl — orchestration via a fake API
