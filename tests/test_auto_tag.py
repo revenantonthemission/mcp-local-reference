@@ -145,9 +145,7 @@ class TestZoteroApiClient:
         assert snap.parent_key is None
         assert snap.raw == {"key": "COLL1234"}
 
-    def test_create_collection_posts_and_returns_snapshot(
-        self, api_config: Config
-    ) -> None:
+    def test_create_collection_posts_and_returns_snapshot(self, api_config: Config) -> None:
         captured: dict[str, object] = {}
 
         def handler(request: httpx.Request) -> httpx.Response:
@@ -186,9 +184,7 @@ class TestZoteroApiClient:
         assert "users/42/collections" in str(captured["url"])
         assert captured["body"] == [{"name": "AI", "parentCollection": "PARENTKK"}]
 
-    def test_create_collection_at_root_sends_false_parent(
-        self, api_config: Config
-    ) -> None:
+    def test_create_collection_at_root_sends_false_parent(self, api_config: Config) -> None:
         captured: dict[str, object] = {}
 
         def handler(request: httpx.Request) -> httpx.Response:
@@ -290,9 +286,7 @@ class TestZoteroApiClient:
         with pytest.raises(VersionConflictError):
             client.update_collection("COLL1234", name="X", version=10)
 
-    def test_delete_collection_sends_delete_with_version(
-        self, api_config: Config
-    ) -> None:
+    def test_delete_collection_sends_delete_with_version(self, api_config: Config) -> None:
         captured: dict[str, object] = {}
 
         def handler(request: httpx.Request) -> httpx.Response:
@@ -314,9 +308,7 @@ class TestZoteroApiClient:
         with pytest.raises(VersionConflictError):
             client.delete_collection("COLL1234", version=15)
 
-    def test_update_item_collections_sends_patch_with_version(
-        self, api_config: Config
-    ) -> None:
+    def test_update_item_collections_sends_patch_with_version(self, api_config: Config) -> None:
         captured: dict[str, object] = {}
 
         def handler(request: httpx.Request) -> httpx.Response:

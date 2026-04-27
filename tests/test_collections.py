@@ -395,3 +395,65 @@ class TestReparentCollection:
         assert result["status"] == "applied"
         assert result["new_version"] == 8
         assert api.update_collection_calls == [("AIK11111", {"parent_key": "OTRK2222"}, 7)]
+
+
+# ======================================================================
+# delete_collection_impl
+# ======================================================================
+
+
+from mcp_local_reference.tools.collections import delete_collection_impl  # noqa: E402
+
+
+class TestDeleteCollection:
+    def test_dry_run_empty_collection(self) -> None:
+        zotero = _FakeZotero(collections=[_coll("AIK11111", "AI")])
+        result = json.loads(delete_collection_impl(_FakeApi(), zotero, "AIK11111", dry_run=True))
+        assert result["status"] == "preview"
+        assert result["would_orphan_items"] == []
+        assert result["would_orphan_collections"] == []
+
+    def test_dry_run_with_items_lists_them(self) -> None:
+        zotero = _FakeZotero(
+            collections=[_coll("AIK11111", "AI")],
+            references={"ITEMA": _ref("ITEMA"), "ITEMB": _ref("ITEMB")},
+            items_per_collection={"AIK11111": ["ITEMA", "ITEMB"]},
+        )
+        result = json.loads(delete_collection_impl(_FakeApi(), zotero, "AIK11111", dry_run=True))
+        assert sorted(result["would_orphan_items"]) == ["ITEMA", "ITEMB"]
+
+    def test_dry_run_with_child_collections_lists_them(self) -> None:
+        zotero = _FakeZotero(
+            collections=[
+                _coll("AIK11111", "AI"),
+                _coll("LLMK2222", "LLMs", "AIK11111"),
+                _coll("MMK33333", "Multimodal", "AIK11111"),
+            ]
+        )
+        result = json.loads(delete_collection_impl(_FakeApi(), zotero, "AIK11111", dry_run=True))
+        assert sorted(result["would_orphan_collections"]) == ["LLMK2222", "MMK33333"]
+
+    def test_dry_run_returns_error_when_missing(self) -> None:
+        result = json.loads(
+            delete_collection_impl(_FakeApi(), _FakeZotero(), "NOPE9999", dry_run=True)
+        )
+        assert "error" in result
+
+    def test_write_deletes(self) -> None:
+        zotero = _FakeZotero(collections=[_coll("AIK11111", "AI")])
+        api = _FakeApi(
+            collection_snapshots={"AIK11111": CollectionSnapshot("AIK11111", 7, "AI", None, {})}
+        )
+        result = json.loads(delete_collection_impl(api, zotero, "AIK11111", dry_run=False))
+        assert result["status"] == "applied"
+        assert api.delete_collection_calls == [("AIK11111", 7)]
+
+    def test_write_version_conflict_returns_error(self) -> None:
+        zotero = _FakeZotero(collections=[_coll("AIK11111", "AI")])
+        api = _FakeApi(
+            collection_snapshots={"AIK11111": CollectionSnapshot("AIK11111", 7, "AI", None, {})},
+            delete_collection_error=VersionConflictError("conflict"),
+        )
+        result = json.loads(delete_collection_impl(api, zotero, "AIK11111", dry_run=False))
+        assert "error" in result
+        assert "conflict" in result["error"]

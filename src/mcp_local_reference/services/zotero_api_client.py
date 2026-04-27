@@ -140,8 +140,7 @@ class ZoteroApiClient:
             response = client.patch(url, json=body)
         if response.status_code == 412:
             raise VersionConflictError(
-                f"Item '{item_key}' was modified since version {version}; "
-                "refetch and retry"
+                f"Item '{item_key}' was modified since version {version}; refetch and retry"
             )
         if response.status_code == 404:
             raise ZoteroApiError(f"Item '{item_key}' not found")
@@ -160,17 +159,13 @@ class ZoteroApiClient:
         with self._client(self._headers()) as client:
             response = client.get(url)
         if response.status_code == 404:
-            raise ZoteroApiError(
-                f"Collection '{collection_key}' not found in Zotero Web API"
-            )
+            raise ZoteroApiError(f"Collection '{collection_key}' not found in Zotero Web API")
         response.raise_for_status()
         body = response.json()
         data = body.get("data", body)
         return self._collection_snapshot_from_data(data)
 
-    def create_collection(
-        self, name: str, parent_key: str | None
-    ) -> CollectionSnapshot:
+    def create_collection(self, name: str, parent_key: str | None) -> CollectionSnapshot:
         """POST a new collection; returns a snapshot of the created collection."""
         self._require_credentials()
         url = self._collections_url()
@@ -181,15 +176,11 @@ class ZoteroApiClient:
         response.raise_for_status()
         body = response.json()
         if body.get("failed"):
-            raise ZoteroApiError(
-                f"Zotero rejected create_collection: {body['failed']}"
-            )
+            raise ZoteroApiError(f"Zotero rejected create_collection: {body['failed']}")
         try:
             entry = body["successful"]["0"]
         except (KeyError, TypeError) as exc:
-            raise ZoteroApiError(
-                f"Unexpected create_collection response: {body!r}"
-            ) from exc
+            raise ZoteroApiError(f"Unexpected create_collection response: {body!r}") from exc
         return self._collection_snapshot_from_data(entry["data"])
 
     def update_collection(

@@ -38,6 +38,7 @@ def register_tools(mcp: FastMCP, config: Config) -> None:
     _register_create_collection(mcp, api, zotero)
     _register_rename_collection(mcp, api, zotero)
     _register_reparent_collection(mcp, api, zotero)
+    _register_delete_collection(mcp, api, zotero)
     _ = pdf  # placeholder until suggest_collection_placement is added in Task 15
 
 
@@ -348,6 +349,64 @@ def reparent_collection_impl(
             "current": {"name": local.name, "parent_key": local.parent_key},
             "after": {"name": local.name, "parent_key": new_parent_key},
             "new_version": new_version,
+            "status": "applied",
+            "dry_run": False,
+        }
+    )
+
+
+# ----------------------------------------------------------------------
+# delete_collection
+# ----------------------------------------------------------------------
+
+
+def _register_delete_collection(mcp: FastMCP, api: ZoteroApiClient, zotero: ZoteroClient) -> None:
+    @mcp.tool()
+    def delete_collection(collection_key: str, dry_run: bool = True) -> str:
+        """Delete a collection. Items inside are NOT deleted — they lose
+        membership in this collection. Sub-collections become orphans.
+        Dry-run lists both blast surfaces before any write.
+        """
+        return delete_collection_impl(api, zotero, collection_key, dry_run)
+
+
+def delete_collection_impl(
+    api: ZoteroApiClient,
+    zotero: ZoteroClient,
+    collection_key: str,
+    dry_run: bool,
+) -> str:
+    local = _local_collection_snapshot(zotero, collection_key)
+    if local is None:
+        return _err(f"Reference '{collection_key}' not found")
+
+    items_inside = [r.item_key for r in zotero.get_collection_items(collection_key, limit=10_000)]
+    descendants = sorted(_walk_descendants(zotero, collection_key))
+
+    if dry_run:
+        return json.dumps(
+            {
+                "collection_key": collection_key,
+                "current": {"name": local.name, "parent_key": local.parent_key},
+                "would_orphan_items": items_inside,
+                "would_orphan_collections": descendants,
+                "status": "preview",
+                "dry_run": True,
+            }
+        )
+
+    try:
+        snap = api.get_collection(collection_key)
+        api.delete_collection(collection_key, snap.version)
+    except (MissingCredentialsError, VersionConflictError, ZoteroApiError) as exc:
+        return _err(str(exc))
+
+    return json.dumps(
+        {
+            "collection_key": collection_key,
+            "deleted": {"name": local.name, "parent_key": local.parent_key},
+            "would_orphan_items": items_inside,
+            "would_orphan_collections": descendants,
             "status": "applied",
             "dry_run": False,
         }
