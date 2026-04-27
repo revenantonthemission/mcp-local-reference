@@ -201,6 +201,25 @@ class ZoteroClient:
         finally:
             conn.close()
 
+    def get_item_collections(self, item_key: str) -> list[str]:
+        """Return the collection keys an item currently belongs to."""
+        conn = self._connect()
+        try:
+            cursor = conn.execute(
+                """
+                SELECT c.key
+                FROM collections c
+                JOIN collectionItems ci ON c.collectionID = ci.collectionID
+                JOIN items i ON ci.itemID = i.itemID
+                WHERE i.key = ?
+                ORDER BY c.key
+                """,
+                (item_key,),
+            )
+            return [row["key"] for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
     def get_pdf_path(self, item_key: str) -> Path | None:
         """Resolve the filesystem path to a reference's PDF attachment."""
         conn = self._connect()

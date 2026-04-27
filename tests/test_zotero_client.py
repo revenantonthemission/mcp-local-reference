@@ -74,3 +74,20 @@ class TestGetAllReferences:
     def test_returns_all(self, config: Config) -> None:
         refs = ZoteroClient(config).get_all_references()
         assert len(refs) == 2
+
+
+class TestGetItemCollections:
+    def test_returns_keys_for_item_in_one_collection(self, config: Config) -> None:
+        from mcp_local_reference.services.zotero_client import ZoteroClient
+
+        client = ZoteroClient(config)
+        # TESTKEY1 is in COLL1 per conftest seed data.
+        keys = client.get_item_collections("TESTKEY1")
+        assert keys == ["COLL1"]
+
+    def test_returns_empty_for_unfiled_item(self, config: Config) -> None:
+        from mcp_local_reference.services.zotero_client import ZoteroClient
+
+        client = ZoteroClient(config)
+        keys = client.get_item_collections("NOSUCHKK")
+        assert keys == []
