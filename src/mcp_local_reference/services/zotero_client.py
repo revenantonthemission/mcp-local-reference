@@ -202,7 +202,11 @@ class ZoteroClient:
             conn.close()
 
     def get_item_collections(self, item_key: str) -> list[str]:
-        """Return the collection keys an item currently belongs to."""
+        """Return the collection keys an item currently belongs to.
+
+        Excludes items in the trash (``deletedItems``) for consistency with
+        ``search`` / ``get_collection_items`` / ``get_reference``.
+        """
         conn = self._connect()
         try:
             cursor = conn.execute(
@@ -212,6 +216,7 @@ class ZoteroClient:
                 JOIN collectionItems ci ON c.collectionID = ci.collectionID
                 JOIN items i ON ci.itemID = i.itemID
                 WHERE i.key = ?
+                  AND i.itemID NOT IN (SELECT itemID FROM deletedItems)
                 ORDER BY c.key
                 """,
                 (item_key,),

@@ -699,9 +699,11 @@ from mcp_local_reference.tools.collections import (  # noqa: E402
 
 
 class _NoOpPdf:
-    """Stand-in for PdfProcessor — placement suggester only needs first-page text."""
+    """Stand-in for PdfProcessor — placement suggester only reads the first page."""
 
-    def first_page_text(self, path) -> str:  # pragma: no cover (stubbed)
+    def extract_text(  # pragma: no cover (stubbed)
+        self, path, start_page=None, end_page=None
+    ) -> str:
         return ""
 
 
@@ -723,7 +725,7 @@ class TestSuggestCollectionPlacement:
 
     def test_falls_back_to_pdf_snippet_when_abstract_empty(self) -> None:
         class _Pdf:
-            def first_page_text(self, path) -> str:
+            def extract_text(self, path, start_page=None, end_page=None) -> str:
                 return "First page snippet text."
 
         zotero = _FakeZotero(

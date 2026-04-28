@@ -662,7 +662,7 @@ def suggest_collection_placement_impl(
             pdf_path = None
         if pdf_path is not None:
             try:
-                snippet = pdf.first_page_text(pdf_path)
+                snippet = pdf.extract_text(pdf_path, start_page=0, end_page=1)
                 if snippet:
                     abstract = snippet[:2000]
             except Exception:  # noqa: BLE001
