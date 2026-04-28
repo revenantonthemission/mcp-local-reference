@@ -125,9 +125,7 @@ class _FakeZotero:
         return [self.references[k] for k in keys if k in self.references]
 
     def count_items_per_collection(self) -> dict[str, int]:
-        return {
-            c.key: len(self.items_per_collection.get(c.key, [])) for c in self.collections
-        }
+        return {c.key: len(self.items_per_collection.get(c.key, [])) for c in self.collections}
 
 
 def _coll(key: str, name: str, parent: str | None = None) -> Collection:
@@ -583,9 +581,7 @@ class TestAddItemsToCollection:
         )
         api = _FakeApi(get_item_error=MissingCredentialsError("no creds"))
         result = json.loads(
-            add_items_to_collection_impl(
-                api, zotero, "AIK11111", ["ITEMA", "ITEMB"], dry_run=False
-            )
+            add_items_to_collection_impl(api, zotero, "AIK11111", ["ITEMA", "ITEMB"], dry_run=False)
         )
         assert "error" in result
         assert "no creds" in result["error"]
