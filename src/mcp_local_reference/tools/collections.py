@@ -673,11 +673,7 @@ def suggest_collection_placement_impl(
     current_keys = zotero.get_item_collections(item_key)
     current_collections = [{"key": k, "name": by_key[k].name} for k in current_keys if k in by_key]
 
-    vocabulary: dict[str, int] = {}
-    for c in all_cols:
-        # 10_000 is a high upper bound to avoid silent truncation; cap is local-side.
-        items = zotero.get_collection_items(c.key, limit=10_000)
-        vocabulary[c.key] = len(items)
+    vocabulary = zotero.count_items_per_collection()
 
     return json.dumps(
         {

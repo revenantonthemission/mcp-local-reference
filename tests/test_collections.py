@@ -124,6 +124,11 @@ class _FakeZotero:
         keys = self.items_per_collection.get(collection_key, [])
         return [self.references[k] for k in keys if k in self.references]
 
+    def count_items_per_collection(self) -> dict[str, int]:
+        return {
+            c.key: len(self.items_per_collection.get(c.key, [])) for c in self.collections
+        }
+
 
 def _coll(key: str, name: str, parent: str | None = None) -> Collection:
     return Collection(key=key, name=name, parent_key=parent)

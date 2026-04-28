@@ -225,6 +225,29 @@ class ZoteroClient:
         finally:
             conn.close()
 
+    def count_items_per_collection(self) -> dict[str, int]:
+        """Return ``{collection_key: item_count}`` for every collection.
+
+        Single aggregate query — used by ``suggest_collection_placement`` for
+        vocabulary anchoring (preferring well-populated folders). Excludes
+        trashed items. Collections with zero items still appear in the map.
+        """
+        conn = self._connect()
+        try:
+            cursor = conn.execute(
+                """
+                SELECT c.key, COUNT(ci.itemID) AS n
+                FROM collections c
+                LEFT JOIN collectionItems ci
+                    ON c.collectionID = ci.collectionID
+                    AND ci.itemID NOT IN (SELECT itemID FROM deletedItems)
+                GROUP BY c.collectionID, c.key
+                """
+            )
+            return {row["key"]: int(row["n"]) for row in cursor.fetchall()}
+        finally:
+            conn.close()
+
     def get_pdf_path(self, item_key: str) -> Path | None:
         """Resolve the filesystem path to a reference's PDF attachment."""
         conn = self._connect()

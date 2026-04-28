@@ -91,3 +91,11 @@ class TestGetItemCollections:
         client = ZoteroClient(config)
         keys = client.get_item_collections("NOSUCHKK")
         assert keys == []
+
+
+class TestCountItemsPerCollection:
+    def test_returns_count_for_each_collection(self, config: Config) -> None:
+        client = ZoteroClient(config)
+        counts = client.count_items_per_collection()
+        # COLL1 has TESTKEY1 and TESTKEY2 per conftest seed data.
+        assert counts.get("COLL1") == 2
