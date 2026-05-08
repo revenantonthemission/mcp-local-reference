@@ -68,7 +68,7 @@ def test_fetch_pdf_network_error_returns_failed():
     assert status == "failed"
 
 
-def _draft(doi: str = "10.1/x", item_type: str = "journalArticle") -> ZoteroItemDraft:
+def _draft(doi: str = "10.1234/x", item_type: str = "journalArticle") -> ZoteroItemDraft:
     return ZoteroItemDraft(
         item_type=item_type,
         fields={"title": "Resolved Title", "DOI": doi},
@@ -103,7 +103,7 @@ def test_doi_dry_run_not_exists_calls_resolver_not_create():
     resolver = MagicMock(return_value=_draft())
 
     result_json = add_reference_by_doi_impl(
-        "10.1/x",
+        "10.1234/x",
         collection_key=None,
         dry_run=True,
         zotero=zotero,
@@ -114,7 +114,7 @@ def test_doi_dry_run_not_exists_calls_resolver_not_create():
     assert result["status"] == "would_create"
     assert result["title"] == "Resolved Title"
     assert result["dry_run"] is True
-    resolver.assert_called_once_with("10.1/x")
+    resolver.assert_called_once_with("10.1234/x")
     zotero_api.create_item.assert_not_called()
 
 
@@ -127,7 +127,7 @@ def test_doi_dry_run_exists_returns_existing_key():
     resolver = MagicMock(return_value=_draft())
 
     result_json = add_reference_by_doi_impl(
-        "10.1/x",
+        "10.1234/x",
         collection_key=None,
         dry_run=True,
         zotero=zotero,
@@ -156,7 +156,7 @@ def test_doi_live_create_calls_create_item_and_returns_new_key():
     resolver = MagicMock(return_value=_draft())
 
     result_json = add_reference_by_doi_impl(
-        "10.1/x",
+        "10.1234/x",
         collection_key="ABC",
         dry_run=False,
         zotero=zotero,
@@ -180,7 +180,7 @@ def test_doi_resolver_not_found_returns_error():
     resolver = MagicMock(side_effect=ResolverNotFoundError("DOI not found"))
 
     result_json = add_reference_by_doi_impl(
-        "10.1/x",
+        "10.1234/x",
         collection_key=None,
         dry_run=True,
         zotero=zotero,
@@ -202,7 +202,7 @@ def test_doi_missing_credentials_propagates():
     resolver = MagicMock(return_value=_draft())
 
     result_json = add_reference_by_doi_impl(
-        "10.1/x",
+        "10.1234/x",
         collection_key=None,
         dry_run=False,
         zotero=zotero,

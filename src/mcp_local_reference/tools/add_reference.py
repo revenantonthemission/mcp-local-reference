@@ -33,7 +33,7 @@ from mcp_local_reference.services.zotero_client import ZoteroClient
 
 logger = logging.getLogger(__name__)
 
-_DOI_RE = re.compile(r"^10\.\d+/[^\s]+$")
+_DOI_RE = re.compile(r"^10\.\d{4,9}/[^\s]+$")
 
 _PDF_MAGIC = b"%PDF-"
 _PDF_MIN_SIZE_BYTES = 1024
