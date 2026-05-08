@@ -75,6 +75,23 @@ def test_resolve_5xx_retries_once_then_raises():
     assert calls["n"] == 2  # original + 1 retry
 
 
+def test_resolve_corporate_author_uses_name_field():
+    body = (FIXTURES / "corporate_author.json").read_bytes()
+    transport = _transport(200, body)
+
+    draft = crossref.resolve("10.1234/corporate.example", transport=transport)
+
+    assert len(draft.creators) == 2
+    # Corporate author: only `name`, no firstName/lastName
+    assert draft.creators[0] == {"creatorType": "author", "name": "OpenAI"}
+    # Personal author: firstName/lastName, no `name`
+    assert draft.creators[1] == {
+        "creatorType": "author",
+        "firstName": "Jane",
+        "lastName": "Doe",
+    }
+
+
 def test_resolve_malformed_response_missing_title_raises():
     transport = _transport(200, b'{"message": {"DOI": "10.1145/x", "type": "journal-article"}}')
 
