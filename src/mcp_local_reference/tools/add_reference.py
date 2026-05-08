@@ -25,6 +25,7 @@ from mcp_local_reference.services.resolvers import (
 )
 from mcp_local_reference.services.resolvers import arxiv as arxiv_resolver
 from mcp_local_reference.services.resolvers import crossref as crossref_resolver
+from mcp_local_reference.services.resolvers import openlibrary as openlibrary_resolver
 from mcp_local_reference.services.zotero_api_client import (
     MissingCredentialsError,
     ZoteroApiClient,
@@ -244,6 +245,101 @@ def add_reference_by_arxiv_impl(
             "item_type": draft.item_type,
             "collection_key": collection_key,
             "pdf_status": pdf_status,
+            "dry_run": False,
+        }
+    )
+
+
+def _is_valid_isbn(raw: str) -> bool:
+    """Validate ISBN-10 or ISBN-13 checksum after normalization."""
+    isbn = openlibrary_resolver.normalize_isbn(raw)
+    if len(isbn) == 10:
+        return _isbn10_checksum(isbn)
+    if len(isbn) == 13:
+        return _isbn13_checksum(isbn)
+    return False
+
+
+def _isbn10_checksum(isbn: str) -> bool:
+    if not all(c.isdigit() or (i == 9 and c == "X") for i, c in enumerate(isbn)):
+        return False
+    total = 0
+    for i, c in enumerate(isbn):
+        v = 10 if c == "X" else int(c)
+        total += v * (10 - i)
+    return total % 11 == 0
+
+
+def _isbn13_checksum(isbn: str) -> bool:
+    if not isbn.isdigit():
+        return False
+    total = 0
+    for i, c in enumerate(isbn):
+        v = int(c)
+        total += v if i % 2 == 0 else v * 3
+    return total % 10 == 0
+
+
+def add_reference_by_isbn_impl(
+    isbn: str,
+    collection_key: str | None,
+    dry_run: bool,
+    *,
+    zotero: ZoteroClient,
+    zotero_api: ZoteroApiClient,
+    resolver: Callable[[str], ZoteroItemDraft] = openlibrary_resolver.resolve,
+) -> str:
+    """Resolve, dedup, and (if not dry-run and not duplicate) POST an ISBN item.
+
+    Returns a JSON string. Shape documented in the spec under 'Response Shape'.
+    """
+    if not _is_valid_isbn(isbn):
+        return json.dumps({"status": "error", "error": f"Invalid ISBN format/checksum: {isbn}"})
+
+    try:
+        draft = resolver(isbn)
+    except ResolverNotFoundError as e:
+        return json.dumps({"status": "error", "error": str(e)})
+    except ResolverError as e:
+        return json.dumps({"status": "error", "error": str(e)})
+
+    existing = zotero.find_by_isbn(isbn)
+    if existing is not None:
+        return json.dumps(
+            {
+                "status": "exists",
+                "item_key": existing,
+                "title": draft.fields.get("title"),
+                "warning": f"Already in library as {existing}",
+                "dry_run": dry_run,
+            }
+        )
+
+    if dry_run:
+        return json.dumps(
+            {
+                "status": "would_create",
+                "title": draft.fields.get("title"),
+                "item_type": draft.item_type,
+                "collection_key": collection_key,
+                "pdf_status": None,
+                "dry_run": True,
+            }
+        )
+
+    try:
+        snapshot = zotero_api.create_item(draft, collection_key=collection_key)
+    except (MissingCredentialsError, ZoteroApiError) as e:
+        return json.dumps({"status": "error", "error": str(e)})
+
+    return json.dumps(
+        {
+            "status": "created",
+            "item_key": snapshot.item_key,
+            "title": draft.fields.get("title"),
+            "item_type": draft.item_type,
+            "collection_key": collection_key,
+            "pdf_status": None,
             "dry_run": False,
         }
     )

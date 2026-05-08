@@ -364,3 +364,103 @@ def test_arxiv_dry_run_pdf_status_skipped():
     assert result["pdf_status"] == "skipped"
     pdf_fetcher.assert_not_called()
     zotero_api.upload_attachment.assert_not_called()
+
+
+def test_isbn_invalid_checksum_returns_error():
+    from mcp_local_reference.tools.add_reference import add_reference_by_isbn_impl
+
+    result_json = add_reference_by_isbn_impl(
+        "9781234567890",
+        collection_key=None,
+        dry_run=True,  # bad ISBN-13 checksum
+        zotero=MagicMock(),
+        zotero_api=MagicMock(),
+        resolver=MagicMock(),
+    )
+    result = json.loads(result_json)
+    assert result["status"] == "error"
+    assert "isbn" in result["error"].lower()
+
+
+def test_isbn_dry_run_not_exists():
+    from mcp_local_reference.tools.add_reference import add_reference_by_isbn_impl
+
+    zotero = MagicMock()
+    zotero.find_by_isbn.return_value = None
+    zotero_api = MagicMock()
+    book_draft = ZoteroItemDraft(
+        item_type="book",
+        fields={"title": "A Book", "ISBN": "9780674042070"},
+        creators=[],
+        pdf_url=None,
+        source_identifier="9780674042070",
+    )
+    resolver = MagicMock(return_value=book_draft)
+
+    result_json = add_reference_by_isbn_impl(
+        "9780674042070",
+        collection_key=None,
+        dry_run=True,
+        zotero=zotero,
+        zotero_api=zotero_api,
+        resolver=resolver,
+    )
+    result = json.loads(result_json)
+    assert result["status"] == "would_create"
+    assert result["item_type"] == "book"
+    assert result["pdf_status"] is None
+
+
+def test_isbn_dry_run_exists():
+    from mcp_local_reference.tools.add_reference import add_reference_by_isbn_impl
+
+    zotero = MagicMock()
+    zotero.find_by_isbn.return_value = "ISBNITEM1"
+    zotero_api = MagicMock()
+    book_draft = ZoteroItemDraft(
+        item_type="book",
+        fields={"title": "T", "ISBN": "9780674042070"},
+        creators=[],
+        pdf_url=None,
+        source_identifier="9780674042070",
+    )
+
+    result_json = add_reference_by_isbn_impl(
+        "978-0-674-04207-0",
+        collection_key=None,
+        dry_run=True,
+        zotero=zotero,
+        zotero_api=zotero_api,
+        resolver=MagicMock(return_value=book_draft),
+    )
+    result = json.loads(result_json)
+    assert result["status"] == "exists"
+    assert result["item_key"] == "ISBNITEM1"
+
+
+def test_isbn10_with_x_check_digit_accepted():
+    from mcp_local_reference.tools.add_reference import add_reference_by_isbn_impl
+
+    # 043942089X is a real valid ISBN-10 (Harry Potter UK first ed.)
+    # checksum: 10*0+9*4+8*3+7*9+6*4+5*2+4*0+3*8+2*9+1*10 = 209, 209 % 11 == 0
+    zotero = MagicMock()
+    zotero.find_by_isbn.return_value = None
+    zotero_api = MagicMock()
+    book_draft = ZoteroItemDraft(
+        item_type="book",
+        fields={"title": "T", "ISBN": "043942089X"},
+        creators=[],
+        pdf_url=None,
+        source_identifier="043942089X",
+    )
+
+    result_json = add_reference_by_isbn_impl(
+        "0-43-942089-X",
+        collection_key=None,
+        dry_run=True,
+        zotero=zotero,
+        zotero_api=zotero_api,
+        resolver=MagicMock(return_value=book_draft),
+    )
+    result = json.loads(result_json)
+    assert result["status"] != "error"
