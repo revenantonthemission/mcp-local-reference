@@ -259,14 +259,21 @@ class ZoteroApiClient:
         if auth_data.get("exists") == 1:
             return attachment_key
 
-        upload_url = auth_data["url"]
-        prefix_raw = auth_data["prefix"]
-        suffix_raw = auth_data["suffix"]
+        try:
+            upload_url = auth_data["url"]
+            prefix_raw = auth_data["prefix"]
+            suffix_raw = auth_data["suffix"]
+            upload_key = auth_data["uploadKey"]
+            upload_content_type = auth_data["contentType"]
+        except (KeyError, TypeError) as exc:
+            raise ZoteroApiError(
+                f"Zotero auth response missing required field for attachment "
+                f"'{attachment_key}': {auth_data!r}"
+            ) from exc
+
         prefix = prefix_raw.encode() if isinstance(prefix_raw, str) else prefix_raw
         suffix = suffix_raw.encode() if isinstance(suffix_raw, str) else suffix_raw
-        upload_key = auth_data["uploadKey"]
         upload_payload = prefix + pdf_bytes + suffix
-        upload_content_type = auth_data["contentType"]
 
         # Step 3: POST bytes to S3
         with self._client({"Content-Type": upload_content_type}) as client:

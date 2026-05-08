@@ -647,6 +647,42 @@ class TestZoteroApiClient:
         # httpx normalizes header names to lowercase
         assert captured_headers[0].get("if-none-match") == "*"
 
+    def test_upload_attachment_raises_on_malformed_auth_response(self, api_config: Config) -> None:
+        """Auth response missing 'url'/'prefix'/etc must surface as ZoteroApiError."""
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            # Step 1: child item create succeeds
+            if "/items" in str(request.url) and "/file" not in str(request.url):
+                return httpx.Response(
+                    200,
+                    json={
+                        "successful": {
+                            "0": {
+                                "key": "ATT",
+                                "version": 1,
+                                "data": {"key": "ATT", "version": 1, "tags": [], "collections": []},
+                            }
+                        },
+                        "failed": {},
+                        "success": {"0": "ATT"},
+                        "unchanged": {},
+                    },
+                )
+            # Step 2: auth POST returns 200 but missing required fields
+            if request.url.path.endswith("/file") and b"upload=" not in request.content:
+                return httpx.Response(200, json={"foo": "bar"})  # no 'url', 'prefix', etc.
+            return httpx.Response(500)
+
+        from mcp_local_reference.services.zotero_api_client import ZoteroApiClient, ZoteroApiError
+
+        client = ZoteroApiClient(api_config, transport=httpx.MockTransport(handler))
+        with pytest.raises(ZoteroApiError) as exc:
+            client.upload_attachment("PARENT", b"%PDF-1.7\n" + b"x" * 2000, "paper.pdf")
+        assert (
+            "missing required field" in str(exc.value).lower()
+            or "auth response" in str(exc.value).lower()
+        )
+
 
 # ======================================================================
 # apply_tags_impl — orchestration via a fake API
