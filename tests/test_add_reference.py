@@ -212,3 +212,155 @@ def test_doi_missing_credentials_propagates():
     result = json.loads(result_json)
     assert result["status"] == "error"
     assert "creds" in result["error"].lower()
+
+
+def _arxiv_draft(arxiv_id: str = "2401.12345") -> ZoteroItemDraft:
+    return ZoteroItemDraft(
+        item_type="preprint",
+        fields={"title": "Preprint Title", "extra": f"arXiv:{arxiv_id}"},
+        creators=[{"creatorType": "author", "firstName": "A", "lastName": "B"}],
+        pdf_url=f"https://arxiv.org/pdf/{arxiv_id}.pdf",
+        source_identifier=arxiv_id,
+    )
+
+
+def test_arxiv_live_create_with_pdf_attached():
+    from mcp_local_reference.tools.add_reference import add_reference_by_arxiv_impl
+
+    zotero = MagicMock()
+    zotero.find_by_arxiv_id.return_value = None
+    zotero_api = MagicMock()
+    zotero_api.create_item.return_value = ItemSnapshot(
+        item_key="NEW789",
+        version=1,
+        tags=[],
+        collections=[],
+        raw={},
+    )
+    zotero_api.upload_attachment.return_value = "ATTACH01"
+    resolver = MagicMock(return_value=_arxiv_draft())
+    pdf_fetcher = MagicMock(return_value=(b"%PDF-1.7\n" + b"x" * 2000, "ok"))
+
+    result_json = add_reference_by_arxiv_impl(
+        "2401.12345",
+        collection_key=None,
+        dry_run=False,
+        zotero=zotero,
+        zotero_api=zotero_api,
+        resolver=resolver,
+        pdf_fetcher=pdf_fetcher,
+        max_pdf_mb=50,
+    )
+    result = json.loads(result_json)
+    assert result["status"] == "created"
+    assert result["pdf_status"] == "attached"
+    zotero_api.upload_attachment.assert_called_once()
+
+
+def test_arxiv_pdf_failed_does_not_roll_back_item():
+    from mcp_local_reference.tools.add_reference import add_reference_by_arxiv_impl
+
+    zotero = MagicMock()
+    zotero.find_by_arxiv_id.return_value = None
+    zotero_api = MagicMock()
+    zotero_api.create_item.return_value = ItemSnapshot(
+        item_key="NEW999",
+        version=1,
+        tags=[],
+        collections=[],
+        raw={},
+    )
+    resolver = MagicMock(return_value=_arxiv_draft())
+    pdf_fetcher = MagicMock(return_value=(None, "failed"))
+
+    result_json = add_reference_by_arxiv_impl(
+        "2401.12345",
+        collection_key=None,
+        dry_run=False,
+        zotero=zotero,
+        zotero_api=zotero_api,
+        resolver=resolver,
+        pdf_fetcher=pdf_fetcher,
+        max_pdf_mb=50,
+    )
+    result = json.loads(result_json)
+    assert result["status"] == "created"
+    assert result["item_key"] == "NEW999"
+    assert result["pdf_status"] == "failed"
+    zotero_api.upload_attachment.assert_not_called()
+
+
+def test_arxiv_pdf_upload_exception_downgrades_to_failed():
+    from mcp_local_reference.services.zotero_api_client import ZoteroApiError
+    from mcp_local_reference.tools.add_reference import add_reference_by_arxiv_impl
+
+    zotero = MagicMock()
+    zotero.find_by_arxiv_id.return_value = None
+    zotero_api = MagicMock()
+    zotero_api.create_item.return_value = ItemSnapshot(
+        item_key="NEW000",
+        version=1,
+        tags=[],
+        collections=[],
+        raw={},
+    )
+    zotero_api.upload_attachment.side_effect = ZoteroApiError("S3 down")
+    resolver = MagicMock(return_value=_arxiv_draft())
+    pdf_fetcher = MagicMock(return_value=(b"%PDF-1.7\n" + b"x" * 2000, "ok"))
+
+    result_json = add_reference_by_arxiv_impl(
+        "2401.12345",
+        collection_key=None,
+        dry_run=False,
+        zotero=zotero,
+        zotero_api=zotero_api,
+        resolver=resolver,
+        pdf_fetcher=pdf_fetcher,
+        max_pdf_mb=50,
+    )
+    result = json.loads(result_json)
+    assert result["status"] == "created"  # NOT rolled back
+    assert result["pdf_status"] == "failed"
+
+
+def test_arxiv_invalid_id_format_returns_error():
+    from mcp_local_reference.tools.add_reference import add_reference_by_arxiv_impl
+
+    result_json = add_reference_by_arxiv_impl(
+        "not-an-arxiv-id",
+        collection_key=None,
+        dry_run=True,
+        zotero=MagicMock(),
+        zotero_api=MagicMock(),
+        resolver=MagicMock(),
+        pdf_fetcher=MagicMock(),
+        max_pdf_mb=50,
+    )
+    result = json.loads(result_json)
+    assert result["status"] == "error"
+
+
+def test_arxiv_dry_run_pdf_status_skipped():
+    from mcp_local_reference.tools.add_reference import add_reference_by_arxiv_impl
+
+    zotero = MagicMock()
+    zotero.find_by_arxiv_id.return_value = None
+    zotero_api = MagicMock()
+    resolver = MagicMock(return_value=_arxiv_draft())
+    pdf_fetcher = MagicMock()
+
+    result_json = add_reference_by_arxiv_impl(
+        "2401.12345",
+        collection_key=None,
+        dry_run=True,
+        zotero=zotero,
+        zotero_api=zotero_api,
+        resolver=resolver,
+        pdf_fetcher=pdf_fetcher,
+        max_pdf_mb=50,
+    )
+    result = json.loads(result_json)
+    assert result["status"] == "would_create"
+    assert result["pdf_status"] == "skipped"
+    pdf_fetcher.assert_not_called()
+    zotero_api.upload_attachment.assert_not_called()

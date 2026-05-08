@@ -23,6 +23,7 @@ from mcp_local_reference.services.resolvers import (
     ResolverNotFoundError,
     ZoteroItemDraft,
 )
+from mcp_local_reference.services.resolvers import arxiv as arxiv_resolver
 from mcp_local_reference.services.resolvers import crossref as crossref_resolver
 from mcp_local_reference.services.zotero_api_client import (
     MissingCredentialsError,
@@ -155,6 +156,94 @@ def add_reference_by_doi_impl(
             "item_type": draft.item_type,
             "collection_key": collection_key,
             "pdf_status": None,
+            "dry_run": False,
+        }
+    )
+
+
+_ARXIV_NEW_RE = re.compile(r"^\d{4}\.\d{4,5}(v\d+)?$")
+_ARXIV_OLD_RE = re.compile(r"^[a-z\-]+/\d{7}$")
+
+
+def _is_valid_arxiv_id(arxiv_id: str) -> bool:
+    return bool(_ARXIV_NEW_RE.fullmatch(arxiv_id) or _ARXIV_OLD_RE.fullmatch(arxiv_id))
+
+
+def add_reference_by_arxiv_impl(
+    arxiv_id: str,
+    collection_key: str | None,
+    dry_run: bool,
+    *,
+    zotero: ZoteroClient,
+    zotero_api: ZoteroApiClient,
+    resolver: Callable[[str], ZoteroItemDraft] = arxiv_resolver.resolve,
+    pdf_fetcher: Callable[[str, int], tuple[bytes | None, str]] = _fetch_pdf,
+    max_pdf_mb: int = 50,
+) -> str:
+    if not _is_valid_arxiv_id(arxiv_id):
+        return json.dumps({"status": "error", "error": f"Invalid arXiv ID format: {arxiv_id}"})
+
+    try:
+        draft = resolver(arxiv_id)
+    except ResolverNotFoundError as e:
+        return json.dumps({"status": "error", "error": str(e)})
+    except ResolverError as e:
+        return json.dumps({"status": "error", "error": str(e)})
+
+    existing = zotero.find_by_arxiv_id(arxiv_id)
+    if existing is not None:
+        return json.dumps(
+            {
+                "status": "exists",
+                "item_key": existing,
+                "title": draft.fields.get("title"),
+                "warning": f"Already in library as {existing}",
+                "dry_run": dry_run,
+            }
+        )
+
+    if dry_run:
+        return json.dumps(
+            {
+                "status": "would_create",
+                "title": draft.fields.get("title"),
+                "item_type": draft.item_type,
+                "collection_key": collection_key,
+                "pdf_status": "skipped",
+                "dry_run": True,
+            }
+        )
+
+    try:
+        snapshot = zotero_api.create_item(draft, collection_key=collection_key)
+    except (MissingCredentialsError, ZoteroApiError) as e:
+        return json.dumps({"status": "error", "error": str(e)})
+
+    pdf_status = "skipped"
+    if draft.pdf_url:
+        pdf_bytes, fetch_status = pdf_fetcher(draft.pdf_url, max_pdf_mb)
+        if fetch_status == "ok" and pdf_bytes is not None:
+            try:
+                zotero_api.upload_attachment(
+                    parent_key=snapshot.item_key,
+                    pdf_bytes=pdf_bytes,
+                    filename=f"{arxiv_id.replace('/', '_')}.pdf",
+                )
+                pdf_status = "attached"
+            except ZoteroApiError as e:
+                logger.warning("PDF upload failed for %s: %s", snapshot.item_key, e)
+                pdf_status = "failed"
+        else:
+            pdf_status = fetch_status  # "failed" or "skipped"
+
+    return json.dumps(
+        {
+            "status": "created",
+            "item_key": snapshot.item_key,
+            "title": draft.fields.get("title"),
+            "item_type": draft.item_type,
+            "collection_key": collection_key,
+            "pdf_status": pdf_status,
             "dry_run": False,
         }
     )
