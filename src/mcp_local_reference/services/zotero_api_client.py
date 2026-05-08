@@ -246,8 +246,10 @@ class ZoteroApiClient:
         auth_headers = {
             **self._headers(),
             "Content-Type": "application/x-www-form-urlencoded",
+            "If-None-Match": "*",
         }
-        auth_body = f"md5={md5}&filename={quote(filename)}&filesize={len(pdf_bytes)}&mtime=0"
+        encoded_filename = quote(filename, safe="")
+        auth_body = f"md5={md5}&filename={encoded_filename}&filesize={len(pdf_bytes)}&mtime=0"
         with self._client(auth_headers) as client:
             auth_response = client.post(file_url, content=auth_body)
         auth_response.raise_for_status()

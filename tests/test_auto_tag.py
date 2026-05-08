@@ -589,6 +589,64 @@ class TestZoteroApiClient:
         with pytest.raises(ZoteroApiError):
             client.upload_attachment("PARENT01", b"%PDF-1.7\n" + b"x" * 2000, "paper.pdf")
 
+    def test_upload_attachment_sets_if_none_match_on_auth_post(self, api_config: Config) -> None:
+        """Zotero's auth-POST requires If-None-Match: * for new uploads."""
+        captured_headers: list[dict[str, str]] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if (
+                request.method == "POST"
+                and "/items" in str(request.url)
+                and "/file" not in str(request.url)
+            ):
+                return httpx.Response(
+                    200,
+                    json={
+                        "successful": {
+                            "0": {
+                                "key": "ATT",
+                                "version": 1,
+                                "data": {"key": "ATT", "version": 1, "tags": [], "collections": []},
+                            }
+                        },
+                        "failed": {},
+                        "success": {"0": "ATT"},
+                        "unchanged": {},
+                    },
+                )
+            if (
+                request.method == "POST"
+                and request.url.path.endswith("/file")
+                and b"upload=" not in request.content
+            ):
+                captured_headers.append(dict(request.headers))
+                return httpx.Response(
+                    200,
+                    json={
+                        "url": "https://s3-mock.example/u",
+                        "contentType": "application/pdf",
+                        "prefix": "P",
+                        "suffix": "S",
+                        "uploadKey": "K",
+                    },
+                )
+            if "s3-mock.example" in str(request.url):
+                return httpx.Response(201)
+            if (
+                request.method == "POST"
+                and request.url.path.endswith("/file")
+                and b"upload=" in request.content
+            ):
+                return httpx.Response(204)
+            return httpx.Response(500)
+
+        client = ZoteroApiClient(api_config, transport=httpx.MockTransport(handler))
+        client.upload_attachment("PARENT", b"%PDF-1.7\n" + b"x" * 2000, "paper.pdf")
+
+        assert len(captured_headers) == 1
+        # httpx normalizes header names to lowercase
+        assert captured_headers[0].get("if-none-match") == "*"
+
 
 # ======================================================================
 # apply_tags_impl — orchestration via a fake API
