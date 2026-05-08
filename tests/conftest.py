@@ -85,6 +85,7 @@ INSERT INTO fields VALUES (11, 'place');
 INSERT INTO fields VALUES (12, 'edition');
 INSERT INTO fields VALUES (13, 'ISBN');
 INSERT INTO fields VALUES (14, 'ISSN');
+INSERT INTO fields VALUES (15, 'extra');
 
 -- Creator types
 INSERT INTO creatorTypes VALUES (1, 'author');
@@ -145,6 +146,27 @@ INSERT INTO itemCreators VALUES (2, 4, 1, 1);
 INSERT INTO collections VALUES (1, 'Machine Learning', NULL, 1, 'COLL1');
 INSERT INTO collectionItems VALUES (1, 1, 0);
 INSERT INTO collectionItems VALUES (1, 2, 1);
+
+-- ── Item with DOI for dedup test ──────────────────────────────────
+INSERT INTO items VALUES (3, 1, 1, 'DOIITEM1', 1);
+INSERT INTO itemDataValues VALUES (20, 'Paper With DOI');
+INSERT INTO itemDataValues VALUES (21, '10.1000/dedup.test');
+INSERT INTO itemData VALUES (3, 1, 20);
+INSERT INTO itemData VALUES (3, 3, 21);
+
+-- ── Preprint with arXiv ID in extra ───────────────────────────────
+INSERT INTO items VALUES (4, 1, 1, 'ARXITEM1', 1);
+INSERT INTO itemDataValues VALUES (22, 'Preprint With arXiv ID');
+INSERT INTO itemDataValues VALUES (23, 'arXiv:2401.99999');
+INSERT INTO itemData VALUES (4, 1, 22);
+INSERT INTO itemData VALUES (4, 15, 23);
+
+-- ── Book with ISBN (stored hyphenated) ────────────────────────────
+INSERT INTO items VALUES (5, 2, 1, 'ISBNITEM1', 1);
+INSERT INTO itemDataValues VALUES (24, 'Book With ISBN');
+INSERT INTO itemDataValues VALUES (25, '978-0-674-04207-0');
+INSERT INTO itemData VALUES (5, 1, 24);
+INSERT INTO itemData VALUES (5, 13, 25);
 """
 
 

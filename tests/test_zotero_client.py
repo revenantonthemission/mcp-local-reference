@@ -73,7 +73,7 @@ class TestCollections:
 class TestGetAllReferences:
     def test_returns_all(self, config: Config) -> None:
         refs = ZoteroClient(config).get_all_references()
-        assert len(refs) == 2
+        assert len(refs) == 5
 
 
 class TestGetItemCollections:
