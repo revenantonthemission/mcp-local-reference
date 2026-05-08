@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom"
+      xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/"
+      xmlns:arxiv="http://arxiv.org/schemas/atom">
+  <link xmlns="http://www.w3.org/2005/Atom" href="http://arxiv.org/api/query?search_query=&amp;id_list=9999.99999&amp;start=0&amp;max_results=10" rel="self" type="application/atom+xml"/>
+  <title type="html">arXiv Query: search_query=&amp;id_list=9999.99999&amp;start=0&amp;max_results=10</title>
+  <id>http://arxiv.org/api/pjNPbLxHHKCo1YAlD5AREyf6Xeg</id>
+  <updated>2024-01-01T00:00:00-05:00</updated>
+  <opensearch:totalResults>0</opensearch:totalResults>
+  <opensearch:startIndex>0</opensearch:startIndex>
+  <opensearch:itemsPerPage>10</opensearch:itemsPerPage>
+</feed>
