@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
+from urllib.parse import quote
 
 import httpx
 
@@ -246,7 +247,7 @@ class ZoteroApiClient:
             **self._headers(),
             "Content-Type": "application/x-www-form-urlencoded",
         }
-        auth_body = f"md5={md5}&filename={filename}&filesize={len(pdf_bytes)}&mtime=0"
+        auth_body = f"md5={md5}&filename={quote(filename)}&filesize={len(pdf_bytes)}&mtime=0"
         with self._client(auth_headers) as client:
             auth_response = client.post(file_url, content=auth_body)
         auth_response.raise_for_status()
