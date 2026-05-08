@@ -338,6 +338,32 @@ class ZoteroClient:
             row = conn.execute(query, (extra_pattern, doi_form)).fetchone()
         return row["key"] if row else None
 
+    def find_by_isbn(self, isbn: str) -> str | None:
+        """Return item_key for an item with this ISBN, or None.
+
+        Normalizes both the input and stored values (strip hyphens/whitespace,
+        uppercase X) before comparing."""
+        target = self._normalize_isbn(isbn)
+        query = """
+            SELECT i.key, idv.value
+            FROM items i
+            JOIN itemData id ON id.itemID = i.itemID
+            JOIN itemDataValues idv ON id.valueID = idv.valueID
+            JOIN fields f ON id.fieldID = f.fieldID
+            LEFT JOIN deletedItems del ON del.itemID = i.itemID
+            WHERE f.fieldName = 'ISBN'
+              AND del.itemID IS NULL
+        """
+        with self._connect() as conn:
+            for row in conn.execute(query):
+                if self._normalize_isbn(row["value"]) == target:
+                    return row["key"]
+        return None
+
+    @staticmethod
+    def _normalize_isbn(isbn: str) -> str:
+        return "".join(ch.upper() if ch in "xX" else ch for ch in isbn if ch.isalnum())
+
     def top_tags(self, limit: int = 30) -> list[tuple[str, int]]:
         """Return the most-used tags in the library as (name, usage_count) pairs.
 

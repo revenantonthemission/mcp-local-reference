@@ -153,3 +153,32 @@ class TestFindByArxivId:
     def test_returns_none_when_no_match(self, config: Config) -> None:
         client = ZoteroClient(config)
         assert client.find_by_arxiv_id("1111.22222") is None
+
+
+class TestFindByIsbn:
+    def test_normalizes_both_sides(self, config: Config) -> None:
+        """Stored as '978-0-674-04207-0' (hyphenated). Query unhyphenated must match."""
+        client = ZoteroClient(config)
+        assert client.find_by_isbn("9780674042070") == "ISBNITEM1"
+
+    def test_matches_hyphenated_query(self, config: Config) -> None:
+        client = ZoteroClient(config)
+        assert client.find_by_isbn("978-0-674-04207-0") == "ISBNITEM1"
+
+    def test_uppercase_x(self, config: Config) -> None:
+        """ISBN-10 with check digit X stored lowercase must still match uppercase query."""
+        import sqlite3
+
+        db_path = config.zotero_data_dir / "zotero.sqlite"
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.execute("INSERT INTO items VALUES (7, 2, 1, 'ISBNXITEM', 1)")
+            conn.execute("INSERT INTO itemDataValues VALUES (40, '0-13-602X-1')")
+            conn.execute("INSERT INTO itemData VALUES (7, 13, 40)")
+            conn.commit()
+
+        client = ZoteroClient(config)
+        assert client.find_by_isbn("013602X1") == "ISBNXITEM"
+
+    def test_returns_none_when_no_match(self, config: Config) -> None:
+        client = ZoteroClient(config)
+        assert client.find_by_isbn("0000000000000") is None
