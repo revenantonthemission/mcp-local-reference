@@ -28,6 +28,7 @@ def test_normalize_isbn_strips_hyphens_and_spaces():
     assert openlibrary.normalize_isbn("978-0-674-04207-0") == "9780674042070"
     assert openlibrary.normalize_isbn("0 631 20569 1") == "0631205691"
     assert openlibrary.normalize_isbn("\t013602X1") == "013602X1".upper()
+    assert openlibrary.normalize_isbn("0-13602x-1") == "013602X1"
 
 
 def test_resolve_isbn13_full():
