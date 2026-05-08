@@ -11,11 +11,29 @@ unit-testable without an MCP harness.
 
 from __future__ import annotations
 
+import json
 import logging
+import re
+from collections.abc import Callable
 
 import httpx
 
+from mcp_local_reference.services.resolvers import (
+    ResolverError,
+    ResolverNotFoundError,
+    ZoteroItemDraft,
+)
+from mcp_local_reference.services.resolvers import crossref as crossref_resolver
+from mcp_local_reference.services.zotero_api_client import (
+    MissingCredentialsError,
+    ZoteroApiClient,
+    ZoteroApiError,
+)
+from mcp_local_reference.services.zotero_client import ZoteroClient
+
 logger = logging.getLogger(__name__)
+
+_DOI_RE = re.compile(r"^10\.\d+/[^\s]+$")
 
 _PDF_MAGIC = b"%PDF-"
 _PDF_MIN_SIZE_BYTES = 1024
@@ -75,3 +93,68 @@ def _fetch_pdf(
         return None, "failed"
 
     return pdf_bytes, "ok"
+
+
+def add_reference_by_doi_impl(
+    doi: str,
+    collection_key: str | None,
+    dry_run: bool,
+    *,
+    zotero: ZoteroClient,
+    zotero_api: ZoteroApiClient,
+    resolver: Callable[[str], ZoteroItemDraft] = crossref_resolver.resolve,
+) -> str:
+    """Resolve, dedup, and (if not dry-run and not duplicate) POST a DOI item.
+
+    Returns a JSON string. Shape documented in the spec under 'Response Shape'.
+    """
+    if not _DOI_RE.fullmatch(doi):
+        return json.dumps({"status": "error", "error": f"Invalid DOI format: {doi}"})
+
+    try:
+        draft = resolver(doi)
+    except ResolverNotFoundError as e:
+        return json.dumps({"status": "error", "error": str(e)})
+    except ResolverError as e:
+        return json.dumps({"status": "error", "error": str(e)})
+
+    existing = zotero.find_by_doi(doi)
+    if existing is not None:
+        return json.dumps(
+            {
+                "status": "exists",
+                "item_key": existing,
+                "title": draft.fields.get("title"),
+                "warning": f"Already in library as {existing}",
+                "dry_run": dry_run,
+            }
+        )
+
+    if dry_run:
+        return json.dumps(
+            {
+                "status": "would_create",
+                "title": draft.fields.get("title"),
+                "item_type": draft.item_type,
+                "collection_key": collection_key,
+                "pdf_status": None,
+                "dry_run": True,
+            }
+        )
+
+    try:
+        snapshot = zotero_api.create_item(draft, collection_key=collection_key)
+    except (MissingCredentialsError, ZoteroApiError) as e:
+        return json.dumps({"status": "error", "error": str(e)})
+
+    return json.dumps(
+        {
+            "status": "created",
+            "item_key": snapshot.item_key,
+            "title": draft.fields.get("title"),
+            "item_type": draft.item_type,
+            "collection_key": collection_key,
+            "pdf_status": None,
+            "dry_run": False,
+        }
+    )
