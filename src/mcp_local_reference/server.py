@@ -6,6 +6,7 @@ from mcp.server.fastmcp import FastMCP
 
 from mcp_local_reference.config import Config
 from mcp_local_reference.tools import (
+    add_reference,
     auto_tag,
     figures,
     local_pdf,
@@ -28,5 +29,6 @@ def create_server() -> FastMCP:
     local_pdf.register_tools(mcp, config)
     auto_tag.register_tools(mcp, config)
     collections_tools.register_tools(mcp, config)
+    add_reference.register_tools(mcp, config)
 
     return mcp

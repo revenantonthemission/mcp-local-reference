@@ -17,7 +17,9 @@ import re
 from collections.abc import Callable
 
 import httpx
+from mcp.server.fastmcp import FastMCP
 
+from mcp_local_reference.config import Config
 from mcp_local_reference.services.resolvers import (
     ResolverError,
     ResolverNotFoundError,
@@ -343,3 +345,83 @@ def add_reference_by_isbn_impl(
             "dry_run": False,
         }
     )
+
+
+def register_tools(mcp: FastMCP, config: Config) -> None:
+    """Register the three add_reference_by_* MCP tools."""
+    zotero = ZoteroClient(config)
+    zotero_api = ZoteroApiClient(config)
+
+    @mcp.tool()
+    def add_reference_by_doi(
+        doi: str,
+        collection_key: str | None = None,
+        dry_run: bool = True,
+    ) -> str:
+        """Add a reference to Zotero by DOI.
+
+        Resolves metadata via Crossref, deduplicates against the local library,
+        and POSTs a new item if not duplicate.
+
+        Args:
+            doi: The DOI string (e.g., '10.1145/3458817.3476195').
+            collection_key: Optional Zotero collection key to file the new item in.
+            dry_run: If True (default), preview the resolved metadata without writing.
+        """
+        return add_reference_by_doi_impl(
+            doi,
+            collection_key=collection_key,
+            dry_run=dry_run,
+            zotero=zotero,
+            zotero_api=zotero_api,
+        )
+
+    @mcp.tool()
+    def add_reference_by_arxiv(
+        arxiv_id: str,
+        collection_key: str | None = None,
+        dry_run: bool = True,
+    ) -> str:
+        """Add a reference to Zotero by arXiv ID.
+
+        Resolves metadata via the arXiv API, deduplicates, POSTs the item, and
+        attempts to attach the open-access PDF as a child item (non-fatal if
+        the PDF can't be fetched).
+
+        Args:
+            arxiv_id: The arXiv identifier (e.g., '2401.12345' or 'hep-th/0211177').
+                Optional 'vN' version suffix preserved on the PDF URL.
+            collection_key: Optional Zotero collection key.
+            dry_run: If True (default), preview without writing.
+        """
+        return add_reference_by_arxiv_impl(
+            arxiv_id,
+            collection_key=collection_key,
+            dry_run=dry_run,
+            zotero=zotero,
+            zotero_api=zotero_api,
+            max_pdf_mb=config.add_reference_max_pdf_mb,
+        )
+
+    @mcp.tool()
+    def add_reference_by_isbn(
+        isbn: str,
+        collection_key: str | None = None,
+        dry_run: bool = True,
+    ) -> str:
+        """Add a reference to Zotero by ISBN.
+
+        Resolves metadata via Open Library, deduplicates, POSTs a new book item.
+
+        Args:
+            isbn: ISBN-10 or ISBN-13, hyphenated or not. Checksum validated.
+            collection_key: Optional Zotero collection key.
+            dry_run: If True (default), preview without writing.
+        """
+        return add_reference_by_isbn_impl(
+            isbn,
+            collection_key=collection_key,
+            dry_run=dry_run,
+            zotero=zotero,
+            zotero_api=zotero_api,
+        )
