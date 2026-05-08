@@ -99,3 +99,27 @@ class TestCountItemsPerCollection:
         counts = client.count_items_per_collection()
         # COLL1 has TESTKEY1 and TESTKEY2 per conftest seed data.
         assert counts.get("COLL1") == 2
+
+
+class TestFindByDoi:
+    def test_find_by_doi_returns_item_key_when_match(self, config: Config) -> None:
+        # DOIITEM1 (itemID=3) has DOI '10.1000/dedup.test' per conftest seed data.
+        result = ZoteroClient(config).find_by_doi("10.1000/dedup.test")
+        assert result == "DOIITEM1"
+
+    def test_find_by_doi_returns_none_when_no_match(self, config: Config) -> None:
+        result = ZoteroClient(config).find_by_doi("10.9999/no-such-paper")
+        assert result is None
+
+    def test_find_by_doi_ignores_deleted_items(self, config: Config) -> None:
+        import sqlite3
+
+        # Mark DOIITEM1 (itemID=3) as deleted — db is at zotero_data_dir/zotero.sqlite.
+        db_path = config.zotero_data_dir / "zotero.sqlite"
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("INSERT INTO deletedItems VALUES (3)")
+        conn.commit()
+        conn.close()
+
+        result = ZoteroClient(config).find_by_doi("10.1000/dedup.test")
+        assert result is None

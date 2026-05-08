@@ -287,6 +287,27 @@ class ZoteroClient:
         finally:
             conn.close()
 
+    def find_by_doi(self, doi: str) -> str | None:
+        """Return item_key for an item whose DOI field equals *doi*, or None.
+
+        Excludes items in deletedItems. Used for skip-and-warn dedup before
+        creating a new item via the Web API."""
+        query = """
+            SELECT i.key
+            FROM items i
+            JOIN itemData id ON id.itemID = i.itemID
+            JOIN itemDataValues idv ON id.valueID = idv.valueID
+            JOIN fields f ON id.fieldID = f.fieldID
+            LEFT JOIN deletedItems del ON del.itemID = i.itemID
+            WHERE f.fieldName = 'DOI'
+              AND idv.value = ?
+              AND del.itemID IS NULL
+            LIMIT 1
+        """
+        with self._connect() as conn:
+            row = conn.execute(query, (doi,)).fetchone()
+        return row["key"] if row else None
+
     def top_tags(self, limit: int = 30) -> list[tuple[str, int]]:
         """Return the most-used tags in the library as (name, usage_count) pairs.
 
