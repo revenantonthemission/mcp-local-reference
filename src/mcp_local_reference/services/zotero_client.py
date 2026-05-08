@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -306,6 +307,35 @@ class ZoteroClient:
         """
         with self._connect() as conn:
             row = conn.execute(query, (doi,)).fetchone()
+        return row["key"] if row else None
+
+    def find_by_arxiv_id(self, arxiv_id: str) -> str | None:
+        """Return item_key for an item that stores this arXiv ID, or None.
+
+        Matches both:
+          - extra field containing 'arXiv:<id>' (Zotero's preprint convention)
+          - DOI field equal to '10.48550/arXiv.<id>' (Crossref-mediated arXiv DOI)
+
+        Strips any trailing version suffix (vN) before comparison."""
+        bare = re.sub(r"v\d+$", "", arxiv_id)
+        query = """
+            SELECT i.key
+            FROM items i
+            JOIN itemData id ON id.itemID = i.itemID
+            JOIN itemDataValues idv ON id.valueID = idv.valueID
+            JOIN fields f ON id.fieldID = f.fieldID
+            LEFT JOIN deletedItems del ON del.itemID = i.itemID
+            WHERE del.itemID IS NULL
+              AND (
+                (f.fieldName = 'extra' AND idv.value LIKE ?)
+                OR (f.fieldName = 'DOI' AND idv.value = ?)
+              )
+            LIMIT 1
+        """
+        extra_pattern = f"%arXiv:{bare}%"
+        doi_form = f"10.48550/arXiv.{bare}"
+        with self._connect() as conn:
+            row = conn.execute(query, (extra_pattern, doi_form)).fetchone()
         return row["key"] if row else None
 
     def top_tags(self, limit: int = 30) -> list[tuple[str, int]]:

@@ -123,3 +123,33 @@ class TestFindByDoi:
 
         result = ZoteroClient(config).find_by_doi("10.1000/dedup.test")
         assert result is None
+
+
+class TestFindByArxivId:
+    def test_via_extra_field(self, config: Config) -> None:
+        """ARXITEM1 has 'arXiv:2401.99999' in its extra field."""
+        client = ZoteroClient(config)
+        assert client.find_by_arxiv_id("2401.99999") == "ARXITEM1"
+
+    def test_strips_version_suffix(self, config: Config) -> None:
+        """v3 of an existing paper should match the version-naked stored form."""
+        client = ZoteroClient(config)
+        assert client.find_by_arxiv_id("2401.99999v3") == "ARXITEM1"
+
+    def test_via_doi_field(self, config: Config) -> None:
+        """If user stored an arXiv paper by its 10.48550/arXiv.<id> DOI, match that too."""
+        import sqlite3
+
+        db_path = config.zotero_data_dir / "zotero.sqlite"
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.execute("INSERT INTO items VALUES (6, 1, 1, 'DOIARXIV1', 1)")
+            conn.execute("INSERT INTO itemDataValues VALUES (30, '10.48550/arXiv.2402.55555')")
+            conn.execute("INSERT INTO itemData VALUES (6, 3, 30)")
+            conn.commit()
+
+        client = ZoteroClient(config)
+        assert client.find_by_arxiv_id("2402.55555") == "DOIARXIV1"
+
+    def test_returns_none_when_no_match(self, config: Config) -> None:
+        client = ZoteroClient(config)
+        assert client.find_by_arxiv_id("1111.22222") is None
