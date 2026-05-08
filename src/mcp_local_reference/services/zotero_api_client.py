@@ -8,6 +8,7 @@ here propagate to the local SQLite on the next sync — so the local
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -196,6 +197,89 @@ class ZoteroApiClient:
             collections=list(data.get("collections", [])),
             raw=data,
         )
+
+    def upload_attachment(
+        self,
+        parent_key: str,
+        pdf_bytes: bytes,
+        filename: str,
+    ) -> str:
+        """Three-step Zotero attachment upload.
+
+        1. Create the child item (``itemType=attachment``, ``linkMode=imported_url``).
+        2. Request S3 upload authorization.
+        3. POST prefixed/suffixed bytes to S3, then register completion.
+
+        Returns the attachment ``item_key`` on success. Raises ``ZoteroApiError``
+        on any step's failure — caller decides whether to swallow (arXiv PDF
+        case) or propagate.
+        """
+        self._require_credentials()
+
+        # Step 1: create the attachment item
+        md5 = hashlib.md5(pdf_bytes).hexdigest()
+        attachment_payload = {
+            "itemType": "attachment",
+            "parentItem": parent_key,
+            "linkMode": "imported_url",
+            "title": filename,
+            "filename": filename,
+            "contentType": "application/pdf",
+            "md5": md5,
+            "mtime": 0,
+        }
+        items_url = self._items_url()
+        with self._client(self._headers()) as client:
+            response = client.post(items_url, json=[attachment_payload])
+        response.raise_for_status()
+        body = response.json()
+        if body.get("failed"):
+            raise ZoteroApiError(f"Zotero rejected attachment create: {body['failed']}")
+        try:
+            attachment_key = body["successful"]["0"]["data"]["key"]
+        except (KeyError, TypeError) as exc:
+            raise ZoteroApiError(f"Unexpected attachment-create response: {body!r}") from exc
+
+        # Step 2: get S3 upload authorization
+        file_url = f"{items_url}/{attachment_key}/file"
+        auth_headers = {
+            **self._headers(),
+            "Content-Type": "application/x-www-form-urlencoded",
+        }
+        auth_body = f"md5={md5}&filename={filename}&filesize={len(pdf_bytes)}&mtime=0"
+        with self._client(auth_headers) as client:
+            auth_response = client.post(file_url, content=auth_body)
+        auth_response.raise_for_status()
+        auth_data = auth_response.json()
+        # If the file already exists on the server (matched by hash), Zotero
+        # returns ``{"exists": 1}`` and skips the S3 step.
+        if auth_data.get("exists") == 1:
+            return attachment_key
+
+        upload_url = auth_data["url"]
+        prefix_raw = auth_data["prefix"]
+        suffix_raw = auth_data["suffix"]
+        prefix = prefix_raw.encode() if isinstance(prefix_raw, str) else prefix_raw
+        suffix = suffix_raw.encode() if isinstance(suffix_raw, str) else suffix_raw
+        upload_key = auth_data["uploadKey"]
+        upload_payload = prefix + pdf_bytes + suffix
+        upload_content_type = auth_data["contentType"]
+
+        # Step 3: POST bytes to S3
+        with self._client({"Content-Type": upload_content_type}) as client:
+            s3_response = client.post(upload_url, content=upload_payload)
+        if s3_response.status_code >= 300:
+            raise ZoteroApiError(
+                f"S3 upload returned {s3_response.status_code} for attachment '{attachment_key}'"
+            )
+
+        # Step 4: register completion
+        register_body = f"upload={upload_key}"
+        with self._client(auth_headers) as client:
+            register_response = client.post(file_url, content=register_body)
+        register_response.raise_for_status()
+
+        return attachment_key
 
     # ------------------------------------------------------------------
     # Collection-object operations

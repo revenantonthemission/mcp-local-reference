@@ -455,6 +455,140 @@ class TestZoteroApiClient:
         with pytest.raises(MissingCredentialsError):
             client.create_item(draft)
 
+    def test_upload_attachment_three_step_flow(self, api_config: Config) -> None:
+        """auth POST -> S3 PUT -> register POST. Each step gets the right body/headers."""
+        calls: list[tuple[str, str]] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            calls.append((str(request.url), request.method))
+
+            # Step 1: child item create (POST to /items)
+            if (
+                request.method == "POST"
+                and "/items" in str(request.url)
+                and "/file" not in str(request.url)
+            ):
+                return httpx.Response(
+                    200,
+                    json={
+                        "successful": {
+                            "0": {
+                                "key": "ATTACH01",
+                                "version": 1,
+                                "data": {
+                                    "key": "ATTACH01",
+                                    "version": 1,
+                                    "tags": [],
+                                    "collections": [],
+                                },
+                            }
+                        },
+                        "failed": {},
+                        "success": {"0": "ATTACH01"},
+                        "unchanged": {},
+                    },
+                )
+
+            # Step 2: get S3 upload auth (POST to /items/<key>/file, no upload= body)
+            if (
+                request.method == "POST"
+                and request.url.path.endswith("/file")
+                and b"upload=" not in request.content
+            ):
+                return httpx.Response(
+                    200,
+                    json={
+                        "url": "https://s3-mock.example/upload",
+                        "contentType": "application/pdf",
+                        "prefix": "PRE",
+                        "suffix": "SUF",
+                        "uploadKey": "U-KEY-123",
+                    },
+                )
+
+            # Step 3: S3 upload
+            if request.method == "POST" and "s3-mock.example" in str(request.url):
+                return httpx.Response(201, content=b"")
+
+            # Step 4: register upload (POST to /items/<key>/file with upload= form body)
+            if (
+                request.method == "POST"
+                and request.url.path.endswith("/file")
+                and b"upload=" in request.content
+            ):
+                return httpx.Response(204)
+
+            return httpx.Response(500, content=b"unexpected")
+
+        client = ZoteroApiClient(api_config, transport=httpx.MockTransport(handler))
+
+        attachment_key = client.upload_attachment(
+            parent_key="PARENT01",
+            pdf_bytes=b"%PDF-1.7\n" + b"x" * 2000,
+            filename="paper.pdf",
+        )
+        assert attachment_key == "ATTACH01"
+        assert any(p.endswith("/items") for p, _ in calls)
+        assert any("/file" in p for p, _ in calls)
+
+    def test_upload_attachment_raises_on_create_failure(self, api_config: Config) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json={
+                    "successful": {},
+                    "failed": {"0": {"code": 403, "message": "no write access"}},
+                    "success": {},
+                    "unchanged": {},
+                },
+            )
+
+        client = ZoteroApiClient(api_config, transport=httpx.MockTransport(handler))
+        with pytest.raises(ZoteroApiError):
+            client.upload_attachment("PARENT01", b"%PDF-1.7\n" + b"x" * 2000, "paper.pdf")
+
+    def test_upload_attachment_raises_on_s3_failure(self, api_config: Config) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            if "/items" in str(request.url) and "/file" not in str(request.url):
+                return httpx.Response(
+                    200,
+                    json={
+                        "successful": {
+                            "0": {
+                                "key": "ATTACH02",
+                                "version": 1,
+                                "data": {
+                                    "key": "ATTACH02",
+                                    "version": 1,
+                                    "tags": [],
+                                    "collections": [],
+                                },
+                            }
+                        },
+                        "failed": {},
+                        "success": {"0": "ATTACH02"},
+                        "unchanged": {},
+                    },
+                )
+            if "/file" in request.url.path and b"upload=" not in request.content:
+                return httpx.Response(
+                    200,
+                    json={
+                        "url": "https://s3-mock.example/u",
+                        "contentType": "application/pdf",
+                        "prefix": "P",
+                        "suffix": "S",
+                        "uploadKey": "K",
+                    },
+                )
+            if "s3-mock.example" in str(request.url):
+                return httpx.Response(500, content=b"S3 down")
+            return httpx.Response(500)
+
+        client = ZoteroApiClient(api_config, transport=httpx.MockTransport(handler))
+        with pytest.raises(ZoteroApiError):
+            client.upload_attachment("PARENT01", b"%PDF-1.7\n" + b"x" * 2000, "paper.pdf")
+
 
 # ======================================================================
 # apply_tags_impl — orchestration via a fake API
