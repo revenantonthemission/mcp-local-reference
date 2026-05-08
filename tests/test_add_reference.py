@@ -464,3 +464,119 @@ def test_isbn10_with_x_check_digit_accepted():
     )
     result = json.loads(result_json)
     assert result["status"] != "error"
+
+
+class TestConcurrencyInvariants:
+    """Pins the dedup ↔ POST race protections from the spec."""
+
+    def test_dedup_check_runs_before_create(self):
+        """Reordering find_by_doi after create_item re-introduces the duplicate-write window."""
+        from mcp_local_reference.tools.add_reference import add_reference_by_doi_impl
+
+        call_order: list[str] = []
+
+        zotero = MagicMock()
+        zotero.find_by_doi.side_effect = lambda *a, **kw: call_order.append("find") or None
+
+        zotero_api = MagicMock()
+        zotero_api.create_item.side_effect = lambda *a, **kw: (
+            call_order.append("create") or ItemSnapshot("X", 1, [], [], {})
+        )
+        resolver = MagicMock(return_value=_draft())
+
+        add_reference_by_doi_impl(
+            "10.1234/x",
+            collection_key=None,
+            dry_run=False,
+            zotero=zotero,
+            zotero_api=zotero_api,
+            resolver=resolver,
+        )
+        assert call_order == ["find", "create"]
+
+    def test_existing_item_blocks_create_call(self):
+        from mcp_local_reference.tools.add_reference import add_reference_by_doi_impl
+
+        zotero = MagicMock()
+        zotero.find_by_doi.return_value = "ABC123"
+        zotero_api = MagicMock()
+        resolver = MagicMock(return_value=_draft())
+
+        add_reference_by_doi_impl(
+            "10.1234/x",
+            collection_key=None,
+            dry_run=False,
+            zotero=zotero,
+            zotero_api=zotero_api,
+            resolver=resolver,
+        )
+        zotero_api.create_item.assert_not_called()
+
+    def test_recovery_after_concurrent_add(self):
+        """Simulates the desktop-added-it-during-our-run race.
+
+        First call: dedup miss → create → success (item_key=NEW123).
+        Second call (different invocation, dedup now finds desktop's add):
+          → returns 'exists' with the desktop's key, no second POST.
+        """
+        from mcp_local_reference.tools.add_reference import add_reference_by_doi_impl
+
+        # First call
+        zotero1 = MagicMock()
+        zotero1.find_by_doi.return_value = None
+        zotero_api1 = MagicMock()
+        zotero_api1.create_item.return_value = ItemSnapshot("NEW123", 1, [], [], {})
+        first = json.loads(
+            add_reference_by_doi_impl(
+                "10.1234/x",
+                collection_key=None,
+                dry_run=False,
+                zotero=zotero1,
+                zotero_api=zotero_api1,
+                resolver=MagicMock(return_value=_draft()),
+            )
+        )
+        assert first["status"] == "created"
+
+        # Second call: dedup now finds an item (could be ours-just-synced or desktop's)
+        zotero2 = MagicMock()
+        zotero2.find_by_doi.return_value = "DESKTOP456"
+        zotero_api2 = MagicMock()
+        second = json.loads(
+            add_reference_by_doi_impl(
+                "10.1234/x",
+                collection_key=None,
+                dry_run=False,
+                zotero=zotero2,
+                zotero_api=zotero_api2,
+                resolver=MagicMock(return_value=_draft()),
+            )
+        )
+        assert second["status"] == "exists"
+        assert second["item_key"] == "DESKTOP456"
+        zotero_api2.create_item.assert_not_called()
+
+    def test_create_does_not_retry_on_timeout(self):
+        """A retry on POST timeout would risk duplicate items — must not retry."""
+        from mcp_local_reference.services.zotero_api_client import ZoteroApiError
+        from mcp_local_reference.tools.add_reference import add_reference_by_doi_impl
+
+        zotero = MagicMock()
+        zotero.find_by_doi.return_value = None
+        zotero_api = MagicMock()
+        zotero_api.create_item.side_effect = ZoteroApiError("timeout")
+        resolver = MagicMock(return_value=_draft())
+
+        result = json.loads(
+            add_reference_by_doi_impl(
+                "10.1234/x",
+                collection_key=None,
+                dry_run=False,
+                zotero=zotero,
+                zotero_api=zotero_api,
+                resolver=resolver,
+            )
+        )
+        assert result["status"] == "error"
+        # Critical: exactly one create attempt, no auto-retry
+        assert zotero_api.create_item.call_count == 1
