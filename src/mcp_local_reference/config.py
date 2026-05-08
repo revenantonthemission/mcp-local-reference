@@ -38,6 +38,7 @@ class Config(BaseSettings):
     zotero_user_id: str = ""
     zotero_api_key: str = ""
     zotero_api_base_url: str = "https://api.zotero.org"
+    add_reference_max_pdf_mb: int = 50
 
     @property
     def zotero_db_path(self) -> Path:
