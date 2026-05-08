@@ -329,6 +329,132 @@ class TestZoteroApiClient:
         assert captured["unmod"] == "20"
         assert captured["body"] == {"collections": ["COLL1111", "COLL2222"]}
 
+    def test_create_item_posts_payload_and_returns_snapshot(self, api_config: Config) -> None:
+        captured: dict[str, object] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured["url"] = str(request.url)
+            captured["body"] = json.loads(request.content)
+            return httpx.Response(
+                200,
+                headers={"Last-Modified-Version": "42"},
+                json={
+                    "successful": {
+                        "0": {
+                            "key": "NEW123ABC",
+                            "version": 42,
+                            "data": {
+                                "key": "NEW123ABC",
+                                "version": 42,
+                                "tags": [],
+                                "collections": [],
+                                "title": "X",
+                            },
+                        }
+                    },
+                    "failed": {},
+                    "success": {"0": "NEW123ABC"},
+                    "unchanged": {},
+                },
+            )
+
+        from mcp_local_reference.services.resolvers import ZoteroItemDraft
+
+        client = ZoteroApiClient(api_config, transport=httpx.MockTransport(handler))
+        draft = ZoteroItemDraft(
+            item_type="journalArticle",
+            fields={"title": "X", "DOI": "10.1/x"},
+            creators=[{"creatorType": "author", "firstName": "A", "lastName": "B"}],
+            pdf_url=None,
+            source_identifier="10.1/x",
+        )
+        snapshot = client.create_item(draft)
+        assert snapshot.item_key == "NEW123ABC"
+        assert snapshot.version == 42
+        assert captured["body"][0]["itemType"] == "journalArticle"  # type: ignore[index]
+        assert captured["body"][0]["title"] == "X"  # type: ignore[index]
+        assert captured["body"][0]["DOI"] == "10.1/x"  # type: ignore[index]
+        assert captured["body"][0]["creators"][0]["lastName"] == "B"  # type: ignore[index]
+
+    def test_create_item_includes_collection_key_when_provided(self, api_config: Config) -> None:
+        captured: dict[str, object] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured["body"] = json.loads(request.content)
+            return httpx.Response(
+                200,
+                json={
+                    "successful": {
+                        "0": {
+                            "key": "K",
+                            "version": 1,
+                            "data": {
+                                "key": "K",
+                                "version": 1,
+                                "tags": [],
+                                "collections": ["XYZ789"],
+                            },
+                        }
+                    },
+                    "failed": {},
+                    "success": {"0": "K"},
+                    "unchanged": {},
+                },
+            )
+
+        from mcp_local_reference.services.resolvers import ZoteroItemDraft
+
+        client = ZoteroApiClient(api_config, transport=httpx.MockTransport(handler))
+        draft = ZoteroItemDraft(
+            item_type="book",
+            fields={"title": "T"},
+            creators=[],
+            pdf_url=None,
+            source_identifier="978",
+        )
+        client.create_item(draft, collection_key="XYZ789")
+        assert captured["body"][0]["collections"] == ["XYZ789"]  # type: ignore[index]
+
+    def test_create_item_raises_on_failed_response(self, api_config: Config) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json={
+                    "successful": {},
+                    "failed": {"0": {"code": 400, "message": "missing title"}},
+                    "success": {},
+                    "unchanged": {},
+                },
+            )
+
+        from mcp_local_reference.services.resolvers import ZoteroItemDraft
+
+        client = ZoteroApiClient(api_config, transport=httpx.MockTransport(handler))
+        draft = ZoteroItemDraft(
+            item_type="journalArticle",
+            fields={"title": "X"},
+            creators=[],
+            pdf_url=None,
+            source_identifier="10.1/x",
+        )
+        with pytest.raises(ZoteroApiError):
+            client.create_item(draft)
+
+    def test_create_item_requires_credentials(self) -> None:
+        from mcp_local_reference.services.resolvers import ZoteroItemDraft
+
+        bare_config = Config(zotero_user_id="", zotero_api_key="")
+        client = ZoteroApiClient(bare_config)
+        draft = ZoteroItemDraft(
+            item_type="book",
+            fields={"title": "T"},
+            creators=[],
+            pdf_url=None,
+            source_identifier="x",
+        )
+        with pytest.raises(MissingCredentialsError):
+            client.create_item(draft)
+
 
 # ======================================================================
 # apply_tags_impl — orchestration via a fake API

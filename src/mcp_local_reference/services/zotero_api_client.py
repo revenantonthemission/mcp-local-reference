@@ -9,9 +9,12 @@ here propagate to the local SQLite on the next sync — so the local
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
+
+if TYPE_CHECKING:
+    from mcp_local_reference.services.resolvers import ZoteroItemDraft
 
 from mcp_local_reference.config import Config
 
@@ -148,6 +151,52 @@ class ZoteroApiClient:
         new_version = response.headers.get("Last-Modified-Version")
         return int(new_version) if new_version else version + 1
 
+    def create_item(
+        self,
+        draft: ZoteroItemDraft,
+        collection_key: str | None = None,
+    ) -> ItemSnapshot:
+        """POST a new item to Zotero. Returns the snapshot of the created item.
+
+        The ``collection_key`` argument, if provided, is included in the POST
+        body's ``collections`` array — this avoids a follow-up PATCH and keeps
+        the create+file operation atomic from the API's point of view.
+
+        Raises:
+            MissingCredentialsError: if user_id / api_key not configured.
+            ZoteroApiError: if Zotero rejects the create (``failed`` non-empty).
+        """
+        self._require_credentials()
+
+        payload: dict[str, Any] = {
+            "itemType": draft.item_type,
+            **draft.fields,
+            "creators": list(draft.creators),
+        }
+        if collection_key is not None:
+            payload["collections"] = [collection_key]
+
+        url = self._items_url()
+        with self._client(self._headers()) as client:
+            response = client.post(url, json=[payload])
+        response.raise_for_status()
+        body = response.json()
+        if body.get("failed"):
+            raise ZoteroApiError(f"Zotero rejected create_item: {body['failed']}")
+        try:
+            entry = body["successful"]["0"]
+        except (KeyError, TypeError) as exc:
+            raise ZoteroApiError(f"Unexpected create_item response: {body!r}") from exc
+
+        data = entry["data"]
+        return ItemSnapshot(
+            item_key=data["key"],
+            version=int(data.get("version", 0)),
+            tags=[t["tag"] for t in data.get("tags", []) if "tag" in t],
+            collections=list(data.get("collections", [])),
+            raw=data,
+        )
+
     # ------------------------------------------------------------------
     # Collection-object operations
     # ------------------------------------------------------------------
@@ -251,9 +300,12 @@ class ZoteroApiClient:
                 "https://www.zotero.org/settings/keys"
             )
 
-    def _item_url(self, item_key: str) -> str:
+    def _items_url(self) -> str:
         base = self.config.zotero_api_base_url.rstrip("/")
-        return f"{base}/users/{self.config.zotero_user_id}/items/{item_key}"
+        return f"{base}/users/{self.config.zotero_user_id}/items"
+
+    def _item_url(self, item_key: str) -> str:
+        return f"{self._items_url()}/{item_key}"
 
     def _collections_url(self) -> str:
         base = self.config.zotero_api_base_url.rstrip("/")
